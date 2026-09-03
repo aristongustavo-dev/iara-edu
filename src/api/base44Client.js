@@ -1,16 +1,8 @@
 import { db } from './db';
-import { pushUsers } from '@/lib/sync';
 
 const delay = () => new Promise((resolve) => setTimeout(resolve, 120));
 
 const clone = (v) => JSON.parse(JSON.stringify(v));
-
-const syncUsersIfChanged = (collection, row) => {
-  if (collection === 'users' && row) {
-    // dispara a sincronização das contas com o servidor (não bloqueia)
-    pushUsers();
-  }
-};
 
 export const base44Client = {
   get: async (collection, filters) => {
@@ -27,21 +19,15 @@ export const base44Client = {
   },
   post: async (collection, data) => {
     await delay();
-    const row = clone(db.insert(collection, data));
-    syncUsersIfChanged(collection, row);
-    return row;
+    return clone(db.insert(collection, data));
   },
   put: async (collection, id, patch) => {
     await delay();
-    const row = clone(db.update(collection, id, patch));
-    syncUsersIfChanged(collection, row);
-    return row;
+    return clone(db.update(collection, id, patch));
   },
   delete: async (collection, id) => {
     await delay();
-    const row = db.remove(collection, id);
-    syncUsersIfChanged(collection, { id });
-    return clone(row);
+    return clone(db.remove(collection, id));
   },
   reset: async () => {
     await delay();

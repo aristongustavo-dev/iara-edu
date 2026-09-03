@@ -3,10 +3,13 @@ const CLOUD_KEY = 'iara_cloud_configured';
 function apiBase() {
   if (typeof window === 'undefined') return '';
   try {
+    // Override manual (ex.: app desktop/EXE, redes locais) — localStorage.setItem('iara_api_url', '...')
+    const override = window.localStorage.getItem('iara_api_url');
+    if (override) return override.replace(/\/$/, '');
     const host = window.location.hostname;
-    // Já hospedado no Vercel (ou qualquer host): usa mesmo domínio /api
-    if (host && host !== 'localhost' && host !== '127.0.0.1') return '';
-    // Dev local: usa o servidor Vercel de produção
+    // Já hospedado (ex.: Vercel) ou em uma rede: usa mesmo domínio /api
+    if (host && host !== 'localhost' && host !== '127.0.0.1' && host !== '') return '';
+    // Dev local / app de desktop: usa o servidor Vercel de produção
     return 'https://iara-edu.vercel.app';
   } catch (e) {
     return '';

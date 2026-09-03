@@ -4,24 +4,22 @@ Plataforma educacional digital (React + Vite). Aplicativo disponível em **vári
 
 | Plataforma | Arquivo / Forma | Como obter |
 |---|---|---|
-| **Navegador (web)** | Link público via túnel Cloudflare | Ver seção "Link público" abaixo |
+| **Navegador (web)** | **Link público permanente: https://iara-edu.vercel.app** | Acessar no navegador de qualquer aparelho |
 | **Celular/Tablet (Android)** | `distribuicao\IARA-EDU-android.apk` | Instalar o APK (permitir "fontes desconhecidas") |
 | **Windows** | `distribuicao\IARA-EDU-windows-instalador.exe` (instalador) ou `IARA-EDU-windows-portable.exe` (sem instalar) | Executar o arquivo |
 | **Qualquer navegador (offline)** | PWA instalável — abre pela web e pode ser instalado na tela inicial | Abrir o link, tocar "Instalar" |
 
 ---
 
-## 1. Link público (rodar no celular agora)
+## 1. Link público permanente (rodar no celular agora)
 
-O servidor local mantém o app no ar na porta 4173 e um túnel Cloudflare expõe:
+O app está **hospedado na nuvem (Vercel)** e acessível de qualquer aparelho:
 
-> **https://specific-analytical-cir-fantastic.trycloudflare.com**
+> **https://iara-edu.vercel.app**
 
-Para manter o app sempre acessível, o watchdog monitora automaticamente:
+Essa URL é **fixa e não muda** — pode ser compartilhada com todos os alunos e professores. Cadastros, contas e progresso são **sincronizados na nuvem** automaticamente (não dependem do servidor local).
 
-1. `watchdog.bat` verifica se o servidor e o túnel estão vivos a cada 2 minutos.
-2. Se morrerem, reinicia automaticamente (registrado como tarefa agendada no Windows).
-3. Para iniciar manualmente: `start-server.bat` + `start-tunnel.bat`.
+> 🛠️ **Alternativa (servidor local + túnel Cloudflare):** a máquina também pode manter um túnel ativo (o watchdog reinicia a cada 2 min), útil para testes em rede. Para obtê-lo: `start-server.bat` + `start-tunnel.bat`; a URL atual fica em `watchdog-url.txt`. **Não é mais necessário** para o uso externo — use o link permanente com prioridade.
 
 ---
 
@@ -65,17 +63,23 @@ Para manter o app sempre acessível, o watchdog monitora automaticamente:
 
 ---
 
-## 6. Deploy público permanente
+## 6. Deploy público permanente (concluído)
 
-Para **não depender** do túnel local (que muda), o projeto está pronto para hospedagem gratuita:
+O projeto está **deployado e no ar** na hospedagem gratuita:
 
-- **Render** (recomendado — grátis, Node.js + URL fixa `https://iara-edu.onrender.com`):
-  1. Suba o código para um repositório no GitHub.
-  2. Em [render.com](https://render.com) → **New → Web Service** → conecte o repositório.
-  3. O arquivo `render.yaml` já vem configurado (build + start). Apenas clique em **Deploy**.
-- **Vercel**: `deploy-vercel.bat` ou `npm run deploy` (requer `npx vercel login` uma única vez). A config de API + SPA já está em `vercel.json` e `api/`.
+- **Vercel** — **https://iara-edu.vercel.app** (URL fixa). Inclui:
+  - SPA (React/Vite) servido do `dist/`.
+  - **Suporte serverless em `/api/db` e `/api/sync`** (pasta `api/` na raiz, config `vercel.json`).
+  - **Persistência real** em **Upstash Redis (KV)**, pré-configurada no projeto — os dados não se perdem.
 
-Depois do deploy, ele gera uma URL fixa (ex.: `https://iara-edu.onrender.com`) — **essa URL não muda** e pode ser compartilhada com todos os alunos e professores. A sincronização de contas (`/api/db` e `/api/sync`) continua igual, agora rodando na nuvem.
+Para **publicar uma nova versão** (após mudanças no código), a partir da pasta do projeto:
+
+```bash
+npx vercel --prod --yes      # requer login (npx vercel login) uma única vez; o login já está ativo na máquina
+```
+
+- **Render** (alternativa): `render.yaml` já pronto para subir em render.com (URL `https://iara-edu.onrender.com`). Não é necessário, pois o Vercel já está ativo.
+- **Offline/aparelhos**: os EXEs/APK continuam funcionando; para o sync apontar para a nuvem, veja a seção 8.
 
 ---
 
@@ -104,11 +108,11 @@ Na tela de acesso `/acesso` (o link que você compartilha), além de entrar com 
 
 Regras: o e-mail precisa ser válido e não pode estar duplicado; a senha precisa ter no mínimo 4 caracteres. Alunos que se cadastram são **matriculados automaticamente** numa turma da série escolhida (quando houver vaga). Contas de demonstração (sem senha) continuam entrando com um toque.
 
-> ⚠️ **Como os dados circulam (com o servidor no ar):** as **contas** (cadastro do aluno, usuários criados em `/Users`) são **sincronizadas entre aparelhos** via a API `/api/sync` embutida no servidor (arquivo `server-data\api-db.json`). Ou seja: um aluno pode se cadastrar em um aparelho e entrar com o mesmo e-mail/senha em **qualquer outro** — o progresso de atividades, fazenda e avatares continua guardado no **dispositivo** onde foi feito.
+> ⚠️ **Como os dados circulam (com a nuvem no ar):** as **contas** (cadastro do aluno, usuários criados em `/Users`) e o **progresso** (atividades, medalhas, fazendinha, avatares, turmas, relatórios) são **sincronizados entre aparelhos** via as APIs `/api/sync` e `/api/db` na nuvem (**Upstash Redis**). Ou seja: um aluno pode se cadastrar em um aparelho e entrar com o mesmo e-mail/senha em **qualquer outro**, e ver o próprio progresso. O app também guarda uma cópia local (offline-first); ele puxa a nuvem ao abrir e empurra a cada alteração.
 >
-> ⚠️ **Realize o sync**: para o cadastro valer em outros aparelhos, o **servidor precisa estar no ar** (não funciona no modo estritamente offline). Cada aparelho puxa/empurra as contas automaticamente ao abrir o app, entrar, sair e ao salvar usuários no painel.
+> ⚠️ **Sync na nuvem**: para cadastro/progresso valer em outros aparelhos, é preciso **internet** (o modo estritamente offline só guarda no dispositivo). Cada aparelho puxa/empurra automaticamente ao abrir o app, entrar, sair e ao salvar usuários no painel.
 >
-> 💡 **App de desktop (Windows), que abre arquivos locais:** para o sync funcionar também no EXE, abra o app e digite no console (F12) `localStorage.setItem('iara_api_url', 'https://specific-analytical-cir-fantastic.trycloudflare.com')` e recarregue. Com o deploy permanente, use a URL fixa (ex.: `https://iara-edu.onrender.com`).
+> 💡 **App de desktop (Windows), que abre arquivos locais:** com o modo de servidor local, se precisar conectar uma API específica, abra F12 e rode `localStorage.setItem('iara_api_url', '...')`. **Com o deploy permanente em nuvem, não é necessário** — o app detecta automaticamente que está hospedado (usando o mesmo domínio `/api`).
 
 ---
 
