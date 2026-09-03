@@ -8,6 +8,7 @@ import PageNotFound from './lib/PageNotFound';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
 import UserNotRegisteredError from '@/components/UserNotRegisteredError';
 import AppLayout from '@/components/AppLayout';
+import TourGuide from '@/components/TourGuide';
 import Home from '@/pages/Home';
 import Dashboard from '@/pages/Dashboard';
 import Activities from '@/pages/Activities';
@@ -107,6 +108,7 @@ function App() {
         <Router>
           <NavigationTracker />
           <AuthenticatedApp />
+          <TourGuide />
         </Router>
         <Toaster />
         <VisualEditAgent />

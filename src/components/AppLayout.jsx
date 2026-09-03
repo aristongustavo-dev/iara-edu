@@ -4,7 +4,7 @@ import { useAuth } from '@/lib/AuthContext';
 import {
   Home, Map, Medal, User, LogOut, BookOpen, Trophy, LayoutDashboard,
   ClipboardList, Users, GraduationCap, CalendarCheck, FileBarChart2,
-  Megaphone, Store, Sparkles, PieChart, Menu, X,
+  Megaphone, Store, Sparkles, PieChart, Menu, X, HelpCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MermaidLogo } from '@/components/ui/MermaidLogo';
@@ -85,6 +85,13 @@ const AppLayout = ({ children, currentPageName }) => {
             <NavLink key={item.to} item={item} current={currentLabel} />
           ))}
         </nav>
+
+        <button
+          onClick={() => window.dispatchEvent(new Event('iara:start-tour'))}
+          className="mb-3 flex items-center justify-center gap-2 text-sm font-bold text-primary bg-primary/10 hover:bg-primary/15 rounded-xl p-2.5 transition-colors"
+        >
+          <HelpCircle size={16} /> Como usar o app
+        </button>
 
         <div className="mt-4 p-4 border-t border-border">
           <div className="flex items-center gap-3 mb-3">
