@@ -10,12 +10,27 @@ import { toast } from '@/components/ui/toaster';
 import { cn } from '@/lib/utils';
 import { Coins, Gem, Zap, MapPin, Plus } from 'lucide-react';
 
+const FloatingReward = ({ reward }) => {
+  if (!reward) return null;
+  return (
+    <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center">
+      <div className="animate-reward-pop card-playful px-8 py-6 text-center space-y-1 shadow-2xl">
+        <span className="text-6xl block animate-bounce-soft">{reward.emoji}</span>
+        <p className="text-2xl font-display font-bold text-emerald-600 animate-reward-pop">+{reward.xp} XP</p>
+        <p className="text-xl font-display font-bold text-amber-500">+{reward.milhos} 🌽 milhos</p>
+        <p className="text-sm text-muted-foreground font-bold">Colheita realizada!</p>
+      </div>
+    </div>
+  );
+};
+
 const Farm = () => {
   const { user, refreshUser } = useAuth();
   const [farm, setFarm] = useState(null);
   const [now, setNow] = useState(Date.now());
   const [selectedCrop, setSelectedCrop] = useState('milho');
   const [events, setEvents] = useState([]);
+  const [reward, setReward] = useState(null);
 
   const reload = useCallback(() => {
     if (!user) return;
@@ -28,6 +43,11 @@ const Farm = () => {
 
   useEffect(() => { reload(); }, [reload]);
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
+  useEffect(() => {
+    if (!reward) return;
+    const t = setTimeout(() => setReward(null), 2600);
+    return () => clearTimeout(t);
+  }, [reward]);
 
   if (!farm) return null;
 
@@ -44,9 +64,9 @@ const Farm = () => {
     else toast.error('Ops!', res.msg);
   };
 
-  const handleHarvest = async (cropId) => {
-    const res = await harvestCrop(farm, cropId);
-    if (res.ok) { toast.success('Colheita!', res.msg); setFarm(res.farm || farm); refreshUser(); reload(); }
+  const handleHarvest = async (rowId) => {
+    const res = await harvestCrop(farm, rowId);
+    if (res.ok) { setReward(res.earned || null); toast.success('Colheita!', res.msg); setFarm(res.farm || farm); refreshUser(); reload(); }
     else toast.error('Erro', res.msg);
   };
 
@@ -54,6 +74,7 @@ const Farm = () => {
 
   return (
     <div className="space-y-6">
+      <FloatingReward reward={reward} />
       <PageHeader
         title={themedEvent ? `${themedEvent.emoji} ${themedEvent.title}` : '🏡 A Fazendinha'}
         subtitle={themedEvent ? `Evento ativo — ganho de XP bônus!` : 'Cultive, construa e cresça estudando!'}
@@ -162,7 +183,7 @@ const Farm = () => {
                 <p className="font-heading font-bold text-sm">{crop.name}</p>
                 {grown ? (
                   <Button size="sm" variant="success" onClick={() => handleHarvest(row.id)}>
-                    🧺 Colher +{crop.xp} XP
+                    🧺 Colher +{crop.xp} XP e +{crop.xp} 🌽
                   </Button>
                 ) : (
                   <>

@@ -84,21 +84,35 @@ export const getCrops = () => CROPS;
 
 export const getCatalog = () => ({ crops: CROPS, animals: FARM_ANIMALS, buildings: FARM_BUILDINGS, decor: FARM_DECOR });
 
-export const harvestCrop = async (farm, cropId) => {
-  const cropDef = CROPS.find((c) => c.id === cropId);
+export const harvestCrop = async (farm, rowId) => {
+  const cropRow = (farm.crops || []).find((c) => c.id === rowId);
+  if (!cropRow) return { ok: false, msg: 'Plantação não encontrada' };
+  const cropDef = CROPS.find((c) => c.id === cropRow.cropId);
   if (!cropDef) return { ok: false, msg: 'Cultura desconhecida' };
-  const crops = (farm.crops || []).filter((c) => c.id !== cropId);
+
+  // A cultura precisa estar crescida para colher (tempo em segundos)
+  const elapsedSec = (Date.now() - (cropRow.plantedAt || 0)) / 1000;
+  if (elapsedSec < (cropDef.time || 0)) {
+    const left = Math.ceil(cropDef.time - elapsedSec);
+    const leftMin = Math.floor(left / 60);
+    const leftSec = String(left % 60).padStart(2, '0');
+    return { ok: false, msg: `Ainda crescendo! Espere mais ${leftMin}:${leftSec}` };
+  }
+
+  const crops = (farm.crops || []).filter((c) => c.id !== rowId);
   const harvest_total = (farm.harvest_total || 0) + 1;
-  const xp = (farm.xp || 0) + cropDef.xp;
-  // colheita: +milhos e +retorno de semente
+  const newXp = (farm.xp || 0) + cropDef.xp;
+  const newMilhos = (farm.milhos || 0) + cropDef.xp;
+
+  // colheita: +milhos e +retorno de semente (economia da fazenda)
   const sementes = { ...(farm.inventories?.sementes || {}) };
   sementes[cropDef.id] = (sementes[cropDef.id] || 0) + 1;
   const patch = {
     crops,
     harvest_total,
-    xp,
-    milhos: (farm.milhos || 0) + cropDef.xp,
-    energy: Math.min(energyMaxFor(xp), ensureEnergy(farm) + 5),
+    xp: newXp,
+    milhos: newMilhos,
+    energy: Math.min(energyMaxFor(newXp), ensureEnergy(farm) + 5),
     inventories: { ...(farm.inventories || {}), sementes },
     colheitas_today: (farm.colheitas_today || 0) + 1,
   };
@@ -116,7 +130,13 @@ export const harvestCrop = async (farm, cropId) => {
     }
   }
 
-  return { ok: true, msg: `Colheita! +${cropDef.xp} XP e +${cropDef.xp} milhos`, farm: getFarmFor(farm.student_email) };
+  return {
+    ok: true,
+    msg: `Colheita! ${cropDef.emoji} +${cropDef.xp} XP e +${cropDef.xp} milhos`,
+    earned: { xp: cropDef.xp, milhos: cropDef.xp, emoji: cropDef.emoji },
+    harvest_total,
+    farm: getFarmFor(farm.student_email),
+  };
 };
 
 export const buyItem = (farm, category, itemId) => {
