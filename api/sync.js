@@ -1,89 +1,95 @@
-let redisCache = null;
+import { kv } from '@vercel/kv'
 
-function getRedis() {
-  const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) return null;
-  if (redisCache) return redisCache;
-  import('@upstash/redis').then((mod) => {
-    redisCache = new mod.Redis({ url, token });
-  }).catch(() => { redisCache = null; });
-  return redisCache;
-}
+const COLLECTIONS = [
+  'users', 'classes', 'activities', 'attempts', 'characters', 'groups',
+  'notices', 'attendances', 'conversations', 'reports', 'farms', 'events',
+]
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
-};
+}
 
-const stamp = (u) => Number(u.updated_at) || 0;
+const json = (res, code, obj) => {
+  res.writeHead(code, { ...CORS, 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
+  res.end(JSON.stringify(obj))
+}
 
-const mergeUsers = (local = [], remote = []) => {
-  const map = new Map();
-  local.forEach((u) => map.set(u.email, u));
-  remote.forEach((ru) => {
-    const cur = map.get(ru.email);
-    if (!cur || stamp(ru) > stamp(cur)) map.set(ru.email, ru);
-  });
-  return Array.from(map.values());
-};
+const stamp = (row) => {
+  if (row && row.updated_at != null) return new Date(row.updated_at).getTime() || 0
+  if (row && row.created_at) return new Date(row.created_at).getTime() || 0
+  return 0
+}
 
-// Fallback em memoria compartilhado na mesma instancia function
-let memStore = { users: [], updatedAt: 0 };
+const emptyDb = () => {
+  const db = { __v: 1 }
+  COLLECTIONS.forEach((c) => { db[c] = [] })
+  return db
+}
+
+// Mescla duas listas preservando a versão mais recente por chave.
+// users -> chave email (sem sobreescrever login com seed), demais -> chave id
+const mergeRows = (local = [], remote = [], keyFn, preferLocal = false) => {
+  const map = new Map()
+  local.forEach((r) => { if (r) map.set(keyFn(r), r) })
+  remote.forEach((r) => {
+    if (!r) return
+    const k = keyFn(r)
+    const cur = map.get(k)
+    if (!cur) map.set(k, r)
+    else if (stamp(r) > stamp(cur)) map.set(k, r)
+    else if (!preferLocal && stamp(r) === stamp(cur)) map.set(k, r)
+  })
+  return Array.from(map.values())
+}
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') {
-    res.writeHead(204, CORS);
-    res.end();
-    return;
+    res.writeHead(204, CORS)
+    res.end()
+    return
   }
   if (req.method !== 'POST') {
-    res.writeHead(405, { ...CORS, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'method not allowed' }));
-    return;
+    return json(res, 405, { error: 'method not allowed' })
   }
 
   try {
-    let body = '';
-    for await (const chunk of req) body += chunk;
-    const payload = JSON.parse(body || '{}');
+    let body = ''
+    for await (const chunk of req) body += chunk
+    const payload = JSON.parse(body || '{}')
+    const incoming = payload.db || payload
 
-    const redis = getRedis();
-    let remoteData = { users: [], updatedAt: 0 };
-    if (redis) {
-      try {
-        const r = await redis.get('iara:users');
-        remoteData = r || { users: [], updatedAt: 0 };
-      } catch (e) {
-        remoteData = memStore;
+    // banco atual na nuvem
+    let cloud = null
+    try {
+      cloud = await kv.get('iara:db')
+    } catch (e) {
+      cloud = null
+    }
+    if (!cloud || typeof cloud !== 'object') cloud = emptyDb()
+
+    const merged = emptyDb()
+    COLLECTIONS.forEach((col) => {
+      const local = Array.isArray(incoming[col]) ? incoming[col] : []
+      const remote = Array.isArray(cloud[col]) ? cloud[col] : []
+      if (col === 'users') {
+        // users: chave por email, não sobreescreve local (evita seed voltar)
+        merged[col] = mergeRows(local, remote, (u) => u.email, true)
+      } else {
+        merged[col] = mergeRows(local, remote, (r) => r.id || JSON.stringify(r))
       }
-    } else {
-      remoteData = memStore;
+    })
+
+    try {
+      await kv.set('iara:db', merged)
+    } catch (e) {
+      // tenta sem o flag se a versão exigir
+      await kv.set('iara:db', merged)
     }
 
-    const merged = mergeUsers(remoteData.users, payload.users || []);
-    const updatedAt = Date.now();
-
-    if (redis) {
-      try {
-        await redis.set('iara:users', { users: merged, updatedAt });
-        memStore = { users: merged, updatedAt };
-      } catch (e) {
-        memStore = { users: merged, updatedAt };
-      }
-    } else {
-      memStore = { users: merged, updatedAt };
-    }
-
-    res.writeHead(200, {
-      ...CORS,
-      'Content-Type': 'application/json; charset=utf-8',
-      'Cache-Control': 'no-store',
-    });
-    res.end(JSON.stringify({ users: merged, updatedAt }));
+    return json(res, 200, merged)
   } catch (e) {
-    res.writeHead(400, { ...CORS, 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: 'requisição inválida' }));
+    return json(res, 400, { error: 'requisição inválida' })
   }
 }

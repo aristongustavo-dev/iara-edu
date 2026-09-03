@@ -1,4 +1,5 @@
 import { uid } from '@/lib/utils';
+import { pullFromCloud, scheduleCloudSync } from './cloud';
 
 const STORAGE_KEY = 'iara_edu_db_v2';
 
@@ -573,25 +574,41 @@ const emptyDb = () => ({
   notices: [], attendances: [], conversations: [], reports: [], farms: [], events: [],
 });
 
+let pulledCloud = false;
 const load = () => {
+  let db;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
       if (!parsed.farms) parsed.farms = [];
       if (!parsed.events) parsed.events = [];
-      return parsed;
+      db = parsed;
     }
   } catch (e) {
-    // ignore
+    db = null;
   }
-  const seeded = buildSeed();
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
-  } catch (e) {
-    // ignore
+  if (!db) {
+    db = buildSeed();
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
+    } catch (e) {
+      // ignore
+    }
   }
-  return seeded;
+  if (!pulledCloud) {
+    pulledCloud = true;
+    pullFromCloud(db).then((merged) => {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+      } catch (e) {
+        // ignore
+      }
+      const evt = new Event('iara:cloud-synced');
+      dispatchEvent(evt);
+    });
+  }
+  return db;
 };
 
 const persist = (db) => {
@@ -600,6 +617,7 @@ const persist = (db) => {
   } catch (e) {
     // ignore
   }
+  scheduleCloudSync(db);
 };
 
 export const db = {
