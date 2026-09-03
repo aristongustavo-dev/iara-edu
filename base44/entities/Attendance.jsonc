@@ -1,0 +1,14 @@
+{
+  "name": "Attendance",
+  "type": "object",
+  "properties": {
+    "class_id": { "type": "string" },
+    "class_name": { "type": "string" },
+    "date": { "type": "string", "format": "date" },
+    "present_emails": { "type": "array", "items": { "type": "string" } },
+    "absent_emails": { "type": "array", "items": { "type": "string" } },
+    "recorded_by_email": { "type": "string" },
+    "notes": { "type": "string" }
+  },
+  "required": ["class_id","date","recorded_by_email"]
+}

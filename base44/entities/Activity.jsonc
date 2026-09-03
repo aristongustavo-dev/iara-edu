@@ -1,0 +1,65 @@
+{
+  "name": "Activity",
+  "type": "object",
+  "properties": {
+    "title": { "type": "string", "description": "Título da atividade" },
+    "description": { "type": "string", "description": "Descrição/objetivo da atividade" },
+    "subject": {
+      "type": "string",
+      "enum": ["matematica","lingua_portuguesa","ciencias","historia","geografia","arte","educacao_fisica","lingua_inglesa","ensino_religioso","interdisciplinar"],
+      "description": "Área do conhecimento segundo BNCC"
+    },
+    "grade_level": { "type": "string", "description": "Série/nível alvo" },
+    "curriculum_framework": { "type": "string", "enum": ["bncc","saeb","saero"], "default": "bncc" },
+    "bncc_skills": { "type": "array", "items": { "type": "string" }, "description": "Códigos das habilidades BNCC (ex: EF06MA01)" },
+    "descriptor_code": { "type": "string", "description": "Descritor/habilidade principal (BNCC, SAEB ou SAERO)" },
+    "game_mode": { "type": "string", "enum": ["quiz_fases","desafio_misto","missao_aventura","jogo_memoria","forca","caca_palavras"], "default": "quiz_fases" },
+    "game_content": {
+      "type": "object",
+      "description": "Conteúdo específico de modos de jogo interativos (memória/forca/caça-palavras)",
+      "properties": {
+        "pairs": {
+          "type": "array",
+          "description": "Jogo da memória: pares que devem ser encontrados (esquerda -> direita)",
+          "items": { "type": "object", "properties": { "left": { "type": "string" }, "right": { "type": "string" } } }
+        },
+        "words": {
+          "type": "array",
+          "description": "Forca ou caça-palavras: palavras a descobrir",
+          "items": {
+            "oneOf": [
+              { "type": "string" },
+              { "type": "object", "properties": { "word": { "type": "string" }, "hint": { "type": "string" } } }
+            ]
+          }
+        }
+      }
+    },
+    "phase": { "type": "number", "default": 1 },
+    "difficulty": { "type": "string", "enum": ["facil","medio","dificil"], "default": "facil" },
+    "xp_reward": { "type": "number", "default": 10 },
+    "medal": { "type": "string", "description": "Medalha ao concluir (bronze/prata/ouro)" },
+    "questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "type": { "type": "string", "enum": ["multipla_escolha","verdadeiro_falso","completar","correspondencia","numerica"] },
+          "statement": { "type": "string" },
+          "options": { "type": "array", "items": { "type": "object", "properties": { "id": { "type": "string" }, "text": { "type": "string" } } } },
+          "pairs": { "type": "array", "items": { "type": "object", "properties": { "left": { "type": "string" }, "right": { "type": "string" } } } },
+          "correct_answer": { "type": "string" },
+          "explanation": { "type": "string" },
+          "points": { "type": "number", "default": 5 },
+          "media_url": { "type": "string" }
+        }
+      }
+    },
+    "assigned_class_ids": { "type": "array", "items": { "type": "string" } },
+    "created_by_email": { "type": "string" },
+    "status": { "type": "string", "enum": ["rascunho","publicada"], "default": "rascunho" },
+    "adapted_by_iara": { "type": "boolean", "default": false }
+  },
+  "required": ["title","subject","grade_level","game_mode","created_by_email"]
+}

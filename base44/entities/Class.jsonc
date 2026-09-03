@@ -1,0 +1,15 @@
+{
+  "name": "Class",
+  "type": "object",
+  "properties": {
+    "name": { "type": "string", "description": "Nome da turma (ex: 6º A, Matutino A)" },
+    "grade_level": { "type": "string", "description": "Série/nível (ex: 6_ano_fund, 2_medio)" },
+    "subject": { "type": "string", "description": "Disciplina principal (BNCC) ou 'geral' para turma base" },
+    "teacher_email": { "type": "string", "description": "Email do professor responsável" },
+    "school_name": { "type": "string" },
+    "year": { "type": "number", "description": "Ano letivo" },
+    "color": { "type": "string", "description": "Cor de identificação (hex)" },
+    "student_emails": { "type": "array", "items": { "type": "string" }, "description": "Emails dos alunos matriculados" }
+  },
+  "required": ["name","grade_level","teacher_email"]
+}

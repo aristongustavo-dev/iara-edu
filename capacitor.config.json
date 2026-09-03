@@ -1,0 +1,1 @@
+﻿{"appId":"br.com.iaraedu.app","appName":"IARA EDU","webDir":"dist","server":{"androidScheme":"https"},"android":{"allowMixedContent":false},"plugins":{"SplashScreen":{"launchShowDuration":1500,"backgroundColor":"#7c3aed","showSpinner":false}}}

@@ -1,0 +1,22 @@
+{
+  "name": "Notice",
+  "type": "object",
+  "properties": {
+    "title": { "type": "string", "description": "Título do aviso/comunicado" },
+    "content": { "type": "string", "description": "Conteúdo em markdown" },
+    "audience": {
+      "type": "string",
+      "enum": ["todos","funcionarios","alunos","professor","supervisao","orientacao","secretaria","direcao","individual"],
+      "default": "alunos",
+      "description": "Público-alvo do aviso"
+    },
+    "target_student_email": { "type": "string" },
+    "target_student_name": { "type": "string" },
+    "author_email": { "type": "string" },
+    "author_name": { "type": "string" },
+    "author_role": { "type": "string" },
+    "category": { "type": "string", "enum": ["aviso","comunicado","evento","lembrete"], "default": "aviso" },
+    "pinned": { "type": "boolean", "default": false }
+  },
+  "required": ["title","content","audience","author_email"]
+}

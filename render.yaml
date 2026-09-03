@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: iara-edu
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: node server.mjs
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: DATA_DIR
+        value: /opt/render/project/src/server-data
+    disk:
+      name: iara-data
+      mountPath: /opt/render/project/src/server-data
+      sizeGB: 1
+    healthCheckPath: /api/db
+    autoDeploy: true

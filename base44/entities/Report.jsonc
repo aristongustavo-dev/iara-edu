@@ -1,0 +1,26 @@
+{
+  "name": "Report",
+  "type": "object",
+  "properties": {
+    "title": { "type": "string" },
+    "student_email": { "type": "string", "description": "Aluno alvo (vazio se relatório de turma)" },
+    "student_name": { "type": "string" },
+    "class_id": { "type": "string", "description": "Turma alvo (vazio se individual)" },
+    "report_type": { "type": "string", "enum": ["desempenho_individual","desempenho_turma","evolucao","frequencia"], "default": "desempenho_individual" },
+    "target_role": { "type": "string", "enum": ["professor","secretaria","pai","direcao"] },
+    "generated_by_email": { "type": "string" },
+    "content": { "type": "string", "description": "Conteúdo em markdown gerado pela Iara" },
+    "summary": {
+      "type": "object",
+      "properties": {
+        "accuracy": { "type": "number" },
+        "xp": { "type": "number" },
+        "attempts": { "type": "number" },
+        "attendance_rate": { "type": "number" }
+      }
+    },
+    "period_start": { "type": "string", "format": "date" },
+    "period_end": { "type": "string", "format": "date" }
+  },
+  "required": ["report_type","generated_by_email","content"]
+}

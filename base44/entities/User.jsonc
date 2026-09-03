@@ -1,0 +1,35 @@
+{
+  "name": "User",
+  "type": "object",
+  "properties": {
+    "role": {
+      "type": "string",
+      "enum": ["aluno","professor","direcao","secretaria","pai"],
+      "default": "aluno",
+      "description": "Perfil do usuário na plataforma"
+    },
+    "school_name": { "type": "string", "description": "Nome da escola vinculada" },
+    "avatar_url": { "type": "string" },
+    "grade_level": { "type": "string", "description": "Série/nível do aluno" },
+    "class_id": { "type": "string", "description": "ID da turma do aluno" },
+    "parent_email": { "type": "string", "description": "Email do responsável vinculado ao aluno" },
+    "child_email": { "type": "string", "description": "Email do aluno vinculado a este responsável" },
+    "subjects": { "type": "array", "items": { "type": "string" }, "description": "Disciplinas lecionadas (professor)" },
+    "xp": { "type": "number", "default": 0 },
+    "level": { "type": "number", "default": 1 },
+    "badges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "icon": { "type": "string" },
+          "earned_date": { "type": "string" }
+        }
+      }
+    },
+    "total_activities": { "type": "number", "default": 0 },
+    "total_correct": { "type": "number", "default": 0 },
+    "streak_days": { "type": "number", "default": 0 }
+  }
+}

@@ -1,0 +1,113 @@
+@import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Nunito:wght@400;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 210 40% 98%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 245 75% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 260 60% 96%;
+    --secondary-foreground: 245 75% 35%;
+    --muted: 220 40% 96%;
+    --muted-foreground: 220 15% 45%;
+    --accent: 280 70% 96%;
+    --accent-foreground: 280 70% 35%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 30% 90%;
+    --input: 220 30% 90%;
+    --ring: 245 75% 60%;
+    --radius: 1rem;
+    --font-heading: "Fredoka", system-ui, sans-serif;
+    --font-body: "Nunito", system-ui, sans-serif;
+    --font-display: "Fredoka", system-ui, sans-serif;
+    --chart-1: 245 75% 60%;
+    --chart-2: 160 65% 45%;
+    --chart-3: 35 95% 55%;
+    --chart-4: 330 80% 60%;
+    --chart-5: 200 85% 55%;
+  }
+  .dark {
+    --background: 222 47% 8%;
+    --foreground: 210 40% 98%;
+    --card: 222 47% 11%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 47% 11%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 245 75% 65%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 217 33% 18%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217 33% 18%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 280 40% 20%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 63% 40%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 217 33% 22%;
+    --input: 217 33% 22%;
+    --ring: 245 75% 65%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-body);
+  }
+  h1, h2, h3, h4, h5 {
+    font-family: var(--font-heading);
+  }
+}
+
+@layer utilities {
+  .font-display { font-family: var(--font-display); }
+  .font-heading { font-family: var(--font-heading); }
+  .text-gradient-primary {
+    background: linear-gradient(135deg, hsl(245 75% 60%), hsl(280 75% 60%));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .card-playful {
+    background: white;
+    border-radius: 1.5rem;
+    box-shadow: 0 10px 30px -10px hsl(245 75% 60% / 0.2);
+    border: 1px solid hsl(220 30% 92%);
+  }
+  .bg-mesh {
+    background-color: hsl(245 75% 98%);
+    background-image:
+      radial-gradient(at 10% 10%, hsl(280 80% 95%) 0px, transparent 50%),
+      radial-gradient(at 90% 20%, hsl(200 85% 92%) 0px, transparent 50%),
+      radial-gradient(at 50% 100%, hsl(330 80% 95%) 0px, transparent 50%);
+  }
+  .confetti-layer {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    overflow: hidden;
+    z-index: 40;
+    background-image:
+      radial-gradient(circle at 10% 20%, hsl(245 80% 60%) 0 4px, transparent 4px),
+      radial-gradient(circle at 30% 10%, hsl(160 80% 50%) 0 5px, transparent 5px),
+      radial-gradient(circle at 55% 25%, hsl(35 95% 55%) 0 4px, transparent 4px),
+      radial-gradient(circle at 75% 15%, hsl(330 80% 60%) 0 5px, transparent 5px),
+      radial-gradient(circle at 90% 30%, hsl(200 85% 55%) 0 4px, transparent 4px),
+      radial-gradient(circle at 45% 35%, hsl(280 70% 55%) 0 3px, transparent 3px);
+    background-size: 90px 90px;
+    background-repeat: repeat;
+    animation: confetti 1.6s ease-out forwards;
+  }
+}

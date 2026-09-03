@@ -1,0 +1,35 @@
+{
+  "name": "Attempt",
+  "type": "object",
+  "properties": {
+    "student_email": { "type": "string" },
+    "student_name": { "type": "string" },
+    "activity_id": { "type": "string" },
+    "activity_title": { "type": "string" },
+    "class_id": { "type": "string" },
+    "subject": { "type": "string" },
+    "answers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "question_id": { "type": "string" },
+          "user_answer": { "type": "string" },
+          "correct_answer": { "type": "string" },
+          "is_correct": { "type": "boolean" },
+          "time_spent_seconds": { "type": "number" },
+          "ai_explanation": { "type": "string" }
+        }
+      }
+    },
+    "score": { "type": "number", "description": "Percentual de acerto 0-100" },
+    "correct_count": { "type": "number" },
+    "total_questions": { "type": "number" },
+    "xp_earned": { "type": "number" },
+    "time_spent_seconds": { "type": "number" },
+    "status": { "type": "string", "enum": ["em_andamento","concluida"], "default": "concluida" },
+    "ai_feedback": { "type": "string", "description": "Devolução pedagógica gerada pela Iara" },
+    "weak_bncc_skills": { "type": "array", "items": { "type": "string" }, "description": "Habilidades BNCC que precisam reforço" }
+  },
+  "required": ["student_email","activity_id","status"]
+}

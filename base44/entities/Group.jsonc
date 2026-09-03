@@ -1,0 +1,15 @@
+{
+  "name": "Group",
+  "type": "object",
+  "properties": {
+    "name": { "type": "string", "description": "Nome do grupo de competição" },
+    "class_id": { "type": "string" },
+    "created_by_email": { "type": "string" },
+    "group_type": { "type": "string", "enum": ["competicao","fase"], "default": "competicao" },
+    "phase": { "type": "number", "default": 1 },
+    "student_emails": { "type": "array", "items": { "type": "string" } },
+    "activity_ids": { "type": "array", "items": { "type": "string" }, "description": "Atividades vinculadas ao grupo" },
+    "emoji": { "type": "string", "default": "🏆" }
+  },
+  "required": ["name","created_by_email"]
+}

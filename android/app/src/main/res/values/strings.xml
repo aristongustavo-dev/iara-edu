@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">IARA EDU</string>
+    <string name="title_activity_main">IARA EDU</string>
+    <string name="package_name">br.com.iaraedu.app</string>
+    <string name="custom_url_scheme">br.com.iaraedu.app</string>
+</resources>

@@ -1,0 +1,23 @@
+{
+  "name": "Conversation",
+  "type": "object",
+  "properties": {
+    "title": { "type": "string", "description": "Resumo da primeira mensagem (para listagem)" },
+    "messages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "role": { "type": "string", "enum": ["user","iara"] },
+          "content": { "type": "string" },
+          "ts": { "type": "string" }
+        },
+        "required": ["role","content"]
+      },
+      "description": "Histórico da conversa com a IARA"
+    },
+    "context_type": { "type": "string", "default": "chat", "description": "Origem: chat, atividade, video" },
+    "context_ref": { "type": "string", "description": "ID de referência (atividade/vídeo) quando aplicável" }
+  },
+  "required": ["messages"]
+}
