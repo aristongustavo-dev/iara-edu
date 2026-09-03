@@ -1,0 +1,14 @@
+node_modules
+release
+distribuicao
+android
+server-data
+*.log
+*.lock
+*.exe
+*.apk
+*.zip
+.env
+.env.local
+.git
+.vercel

@@ -1,9 +1,15 @@
-import { Redis } from '@upstash/redis';
+let redisCache = null;
 
-const redis = new Redis({
-  url: process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL,
-  token: process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN,
-});
+function getRedis() {
+  const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) return null;
+  if (redisCache) return redisCache;
+  import('@upstash/redis').then((mod) => {
+    redisCache = new mod.Redis({ url, token });
+  }).catch(() => { redisCache = null; });
+  return redisCache;
+}
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -23,13 +29,15 @@ const mergeUsers = (local = [], remote = []) => {
   return Array.from(map.values());
 };
 
+// Fallback em memoria compartilhado na mesma instancia function
+let memStore = { users: [], updatedAt: 0 };
+
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') {
     res.writeHead(204, CORS);
     res.end();
     return;
   }
-
   if (req.method !== 'POST') {
     res.writeHead(405, { ...CORS, 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'method not allowed' }));
@@ -40,11 +48,34 @@ export default async function handler(req, res) {
     let body = '';
     for await (const chunk of req) body += chunk;
     const payload = JSON.parse(body || '{}');
-    const remote = await redis.get('iara:users');
-    const remoteData = remote || { users: [], updatedAt: 0 };
+
+    const redis = getRedis();
+    let remoteData = { users: [], updatedAt: 0 };
+    if (redis) {
+      try {
+        const r = await redis.get('iara:users');
+        remoteData = r || { users: [], updatedAt: 0 };
+      } catch (e) {
+        remoteData = memStore;
+      }
+    } else {
+      remoteData = memStore;
+    }
+
     const merged = mergeUsers(remoteData.users, payload.users || []);
     const updatedAt = Date.now();
-    await redis.set('iara:users', { users: merged, updatedAt });
+
+    if (redis) {
+      try {
+        await redis.set('iara:users', { users: merged, updatedAt });
+        memStore = { users: merged, updatedAt };
+      } catch (e) {
+        memStore = { users: merged, updatedAt };
+      }
+    } else {
+      memStore = { users: merged, updatedAt };
+    }
+
     res.writeHead(200, {
       ...CORS,
       'Content-Type': 'application/json; charset=utf-8',
