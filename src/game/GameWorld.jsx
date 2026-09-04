@@ -10,14 +10,20 @@ import { useAuth } from '@/lib/AuthContext';
 import { touchInput, setTouchInput } from './input';
 import { getOrCreateFarm, getFarmFor, plantCrop, harvestCrop, advanceFarmDay } from '@/api/farm';
 import { CROPS } from '@/api/integrations';
+import {
+  RIVER, BRIDGE, MATERIALS, START_MATERIALS, CHALLENGE_REWARD_MATERIALS,
+  QUESTIONS, ARENA_ROUNDS, CITY, ARENA, NPC_DIALOGS,
+} from './worldContent';
 
 const GRAVITY = -20;
 const JUMP_FORCE = 8;
 const WALK_SPEED = 4;
 const RUN_SPEED = 8;
+const CROUCH_SPEED = 2;
 const PLAYER_HEIGHT = 1.6;
 const GROUND_TOP = 0.5;
 const FEET_Y = GROUND_TOP + PLAYER_HEIGHT / 2;
+const FEET_Y_CROUCH = GROUND_TOP + 0.5;
 const WORLD_BOUNDS = 36;
 const INSTANCE_CAP = 8000;
 const PICK_RANGE = 1.9;
@@ -29,6 +35,7 @@ const keyMap = [
   { name: 'right', keys: ['KeyD', 'ArrowRight'] },
   { name: 'run', keys: ['ShiftLeft', 'ShiftRight'] },
   { name: 'jump', keys: ['Space'] },
+  { name: 'crouch', keys: ['KeyC'] },
 ];
 
 const toKey = (x, y, z) => `${x},${y},${z}`;
@@ -52,6 +59,9 @@ const C = {
   obsidian: '#2B2B45',
   sand: '#E8D5A3',
   fence: '#7A5230',
+  fenceDark: '#5C3D22',
+  city: '#D9D4C4',
+  rail: '#7FA8B7',
 };
 
 const GLASSY = new Set([C.water, C.glass]);
@@ -95,12 +105,13 @@ const BUILDINGS = [
 
 const TREES = [
   [-29, -29], [-25, 20], [29, -25], [29, 25], [-29, 5],
-  [0, 29], [-20, 25], [25, -29], [-8, 20], [15, 25],
+  [0, 28], [-20, 21], [25, -29], [-8, 20], [20, 27],
   [5, -20], [-28, 8], [22, 22], [-5, -28], [27, -7],
+  [-16, 34], [6, 34],
 ];
 
 const MOUNTAINS = [
-  { p: [-29, -29], r: 6, h: 8 },
+  { p: [-22, 33], r: 5, h: 6 },
   { p: [30, -29], r: 6, h: 9 },
   { p: [29, 30], r: 5, h: 7 },
   { p: [-30, 31], r: 4, h: 5 },
@@ -108,12 +119,23 @@ const MOUNTAINS = [
 
 const LAKE = { x0: 26, x1: 30, z0: 20, z1: 24 };
 
+const CITY_BUILDINGS = [
+  { p: [0.5, 30], w: 7, d: 6, h: 5, wall: '#8B4513', roof: '#F5F5F5', label: 'Biblioteca das Fórmulas' },
+  { p: [-9, 29.5], w: 6, d: 6, h: 4, wall: '#F0F0F0', roof: '#37474F', label: 'Câmara dos Números' },
+  { p: [9.5, 29], w: 5, d: 5, h: 4, wall: '#2ECC71', roof: '#1E8449', label: 'Laboratório de Física' },
+  { p: [0.5, 33.5], w: 4, d: 4, h: 2, wall: '#4FC3F7', roof: C.gold, label: 'Observatório π' },
+];
+
 const COLLECTIBLES = [
   { id: 'coin', type: 'coin', p: [-5, 1, -5], c: C.gold },
   { id: 'gem', type: 'gem', p: [8, 1, -3], c: '#4FC3F7' },
   { id: 'heart', type: 'heart', p: [-8, 1, 8], c: '#FF6B6B' },
   { id: 'seed', type: 'seed', p: [15, 1, -8], c: '#4CAF50' },
   { id: 'star', type: 'star', p: [-15, 1, -8], c: '#B39DDB' },
+  { id: 'cityCoin1', type: 'coin', p: [4, 1, 28], c: C.gold },
+  { id: 'cityCoin2', type: 'gem', p: [-6, 1, 32], c: '#4FC3F7' },
+  { id: 'cityCard', type: 'star', p: [10, 1, 34], c: '#B39DDB' },
+  { id: 'arenaCup', type: 'gem', p: [-20.5, 1, -12.5], c: C.gold },
 ];
 
 const NPCS = [
@@ -121,7 +143,11 @@ const NPCS = [
   { p: [2, -9], c: '#4A90D9', label: 'Professor' },
   { p: [-10, 12], c: '#8B6914', label: 'Agricultor' },
   { p: [15, 12], c: '#E67E22', label: 'Mercador' },
+  { p: [0.5, 27.5], c: '#E91E63', label: 'CityTeacher' },
+  { p: [ARENA.npc.x, ARENA.npc.z], c: ARENA.npc.c, label: 'ArenaReferee' },
 ];
+
+const WORKSITE = { x: 0, z: 17, label: 'Ponte', name: 'Canteiro da Ponte' };
 
 const worldShared = { front: null, ghost: { x: 0, y: 0, z: 0, ok: false, color: '#ffffff', visible: false }, rot: 0 };
 
@@ -132,13 +158,14 @@ const makeOccSet = (placed, crops) => {
   return set;
 };
 
-function computeFront({ px, pz, rot, placed, crops, mode, occSet }) {
+function computeFront({ px, pz, rot, placed, crops, mode, occSet, groundTop }) {
   const dirX = Math.sin(rot);
   const dirZ = Math.cos(rot);
   const fx = Math.round(px + dirX * PICK_RANGE);
   const fz = Math.round(pz + dirZ * PICK_RANGE);
   if (fx < -37 || fx > 37 || fz < -37 || fz > 37) return { x: fx, y: 1, z: fz, ok: false, purpose: 'none', color: '#ffffff' };
-  const groundId = STATIC_WORLD.groundTop.get(`${fx},${fz}`);
+  const gTop = groundTop || STATIC_WORLD.groundTop;
+  const groundId = gTop.get(`${fx},${fz}`);
   const occ = occSet || makeOccSet(placed, crops);
 
   const crop = crops[toKey(fx, 1, fz)];
@@ -190,15 +217,36 @@ function buildStaticWorld() {
     for (let z = r0; z <= r1; z++) {
       const inLake = x >= LAKE.x0 && x <= LAKE.x1 && z >= LAKE.z0 && z <= LAKE.z1;
       const onRoad = (Math.abs(x) <= 1 || Math.abs(z) <= 1) && !(x === 0 && z >= 6 && z <= 14);
-      let top = onRoad ? C.road : inLake ? C.water : C.grass;
+      const inRiver = x >= RIVER.x0 && x <= RIVER.x1 && z >= RIVER.z0 && z <= RIVER.z1;
+      const inCity = z >= CITY.pavement.z0 && z <= CITY.pavement.z1 && x >= CITY.pavement.x0 && x <= CITY.pavement.x1;
+      const inArena = x >= ARENA.x0 && x <= ARENA.x1 && z >= ARENA.z0 && z <= ARENA.z1;
+      let top = C.grass;
+      let topId = 'grass';
+      if (inRiver) { top = C.water; topId = 'water'; }
+      else if (onRoad) { top = C.road; topId = 'road'; }
+      else if (inCity) { top = C.city; topId = 'road'; }
+      else if (inArena) { top = C.sand; topId = 'sand'; }
       cells.push({ x, y: -2, z, c: C.stone });
       cells.push({ x, y: -1, z, c: C.dirt });
       cells.push({ x, y: 0, z, c: top });
-      groundTop.set(`${x},${z}`, onRoad ? 'road' : inLake ? 'water' : 'grass');
+      groundTop.set(`${x},${z}`, topId);
     }
   }
 
-  BUILDINGS.forEach((b) => {
+  const pushBankWall = (z) => {
+    for (let x = r0; x <= r1; x++) {
+      if (BRIDGE.mouth.includes(x)) continue;
+      for (let y = 1; y <= 3; y++) {
+        cells.push({ x, y, z, c: C.fenceDark });
+        solidKeys.add(toKey(x, y, z));
+        occKeys.add(toKey(x, y, z));
+      }
+    }
+  };
+  pushBankWall(BRIDGE.gateSouthZ);
+  pushBankWall(BRIDGE.gateNorthZ);
+
+  BUILDINGS.concat(CITY_BUILDINGS).forEach((b) => {
     const x0 = Math.round(b.p[0] - b.w / 2);
     const x1 = x0 + b.w - 1;
     const z0 = Math.round(b.p[1] - b.d / 2);
@@ -282,6 +330,21 @@ function buildStaticWorld() {
     }
   });
 
+  const arenaX0 = ARENA.x0, arenaX1 = ARENA.x1, arenaZ0 = ARENA.z0, arenaZ1 = ARENA.z1;
+  for (let x = arenaX0 - 1; x <= arenaX1 + 1; x++) {
+    for (let z = arenaZ0 - 1; z <= arenaZ1 + 1; z++) {
+      const edge = x === arenaX0 - 1 || x === arenaX1 + 1 || z === arenaZ0 - 1 || z === arenaZ1 + 1;
+      if (!edge) continue;
+      const gate = z === arenaZ0 - 1 && (x === -20 || x === -21);
+      if (gate) continue;
+      for (let y = 1; y <= 2; y++) {
+        cells.push({ x, y, z, c: C.fence });
+        solidKeys.add(toKey(x, y, z));
+        occKeys.add(toKey(x, y, z));
+      }
+    }
+  }
+
   for (let x = -6; x <= 6; x += 2) {
     cells.push({ x, y: 1, z: 8, c: C.fence });
     occKeys.add(toKey(x, 1, 8));
@@ -293,6 +356,71 @@ function buildStaticWorld() {
 }
 
 const STATIC_WORLD = buildStaticWorld();
+
+function buildMultiWorld({ placed, crops, progress }) {
+  const occKeys = new Set(STATIC_WORLD.occKeys);
+  const solidKeys = new Set(STATIC_WORLD.solidKeys);
+  const groundTop = new Map(STATIC_WORLD.groundTop);
+
+  Object.keys(placed).forEach((k) => {
+    occKeys.add(k);
+    solidKeys.add(k);
+  });
+  Object.keys(crops).forEach((k) => occKeys.add(k));
+
+  const planks = progress?.planks || [false, false, false];
+  const plankSet = new Set();
+  const railCells = [];
+  const gateCells = [];
+
+  const pushGate = (zSide) => {
+    BRIDGE.mouth.forEach((x) => {
+      for (let y = 1; y <= 3; y++) {
+        const cell = { x, y, z: zSide, c: C.fenceDark };
+        gateCells.push(cell);
+        occKeys.add(toKey(x, y, zSide));
+        solidKeys.add(toKey(x, y, zSide));
+      }
+    });
+  };
+
+  if (!planks[0]) pushGate(BRIDGE.gateSouthZ);
+  if (!planks[2]) pushGate(BRIDGE.gateNorthZ);
+
+  BRIDGE.span.forEach((z, i) => {
+    if (!planks[i]) return;
+    BRIDGE.mouth.forEach((x) => {
+      plankSet.add(`${x},${z}`);
+    });
+    [-2, 2].forEach((x) => {
+      for (let y = 1; y <= 2; y++) {
+        const cell = { x, y, z, c: C.fenceDark };
+        railCells.push(cell);
+        occKeys.add(toKey(x, y, z));
+      }
+    });
+  });
+
+  const staticCells = STATIC_WORLD.cells.filter((c) => !(c.y === 0 && plankSet.has(`${c.x},${c.z}`)));
+  const plankCells = [];
+  plankSet.forEach((k) => {
+    const [x, z] = k.split(',').map(Number);
+    plankCells.push({ x, y: 0, z, c: C.plank });
+    groundTop.set(k, 'plank');
+  });
+
+  const placedCells = Object.values(placed).map((p) => ({
+    x: p.x, y: p.y, z: p.z, c: (BLOCKS.find((b) => b.id === p.id) || { c: C.dirt }).c,
+  }));
+
+  return {
+    cells: staticCells.concat(railCells).concat(gateCells).concat(plankCells).concat(placedCells),
+    solidKeys,
+    occKeys,
+    groundTop,
+    planks,
+  };
+}
 
 function VoxelLayer({ cells, color, castShadow = true }) {
   const ref = useRef(null);
@@ -477,12 +605,19 @@ function VoxelPlayer({
       direction.z -= t.y;
     }
     direction.normalize();
-    const speed = (keys.run || touchInput.run) ? RUN_SPEED : WALK_SPEED;
+    const crouch = !!keys.crouch;
+    const speed = crouch ? CROUCH_SPEED : (keys.run || touchInput.run) ? RUN_SPEED : WALK_SPEED;
 
     if (direction.length() > 0) {
       const angle = Math.atan2(direction.x, direction.z);
       meshRef.current.rotation.y = angle;
       worldShared.rot = angle;
+    }
+
+    const baseY = crouch ? FEET_Y_CROUCH : FEET_Y;
+    const targetScaleY = crouch ? 0.72 : 1;
+    if (Math.abs(meshRef.current.scale.y - targetScaleY) > 0.001) {
+      meshRef.current.scale.y += (targetScaleY - meshRef.current.scale.y) * 0.25;
     }
 
     velocity.current.x = direction.x * speed;
@@ -504,8 +639,8 @@ function VoxelPlayer({
     else velocity.current.z = 0;
 
     pos.y += velocity.current.y * delta;
-    if (pos.y <= FEET_Y) {
-      pos.y = FEET_Y;
+    if (pos.y <= baseY) {
+      pos.y = baseY;
       velocity.current.y = 0;
       isGrounded.current = true;
     }
@@ -604,7 +739,8 @@ function Collectibles({ items, playerRef, onCollect }) {
     ));
 }
 
-function GameScene({ playerPosRef, placed, crops, mode, seedColor, onCollect }) {
+function GameScene({ playerPosRef, placed, crops, mode, seedColor, onCollect, progress }) {
+  const spawn = spawnFromHash();
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
@@ -612,13 +748,9 @@ function GameScene({ playerPosRef, placed, crops, mode, seedColor, onCollect }) 
     return () => clearInterval(id);
   }, []);
 
-  const occSet = useMemo(() => makeOccSet(placed, crops), [placed, crops]);
-
-  const collisionSet = useMemo(() => {
-    const set = new Set(STATIC_WORLD.solidKeys);
-    Object.keys(placed).forEach((k) => set.add(k));
-    return set;
-  }, [placed]);
+  const world = useMemo(() => buildMultiWorld({ placed, crops, progress }), [placed, crops, progress]);
+  const occSet = world.occKeys;
+  const collisionSet = world.solidKeys;
 
   const solidAt = useMemo(
     () => (px, pz) => {
@@ -626,7 +758,7 @@ function GameScene({ playerPosRef, placed, crops, mode, seedColor, onCollect }) 
         for (let dz = -0.35; dz <= 0.35; dz += 0.7) {
           const cx = Math.floor(px + dx);
           const cz = Math.floor(pz + dz);
-          for (let y = 1; y <= 2; y++) {
+          for (let y = 1; y <= 3; y++) {
             if (collisionSet.has(toKey(cx, y, cz))) return true;
           }
         }
@@ -636,16 +768,7 @@ function GameScene({ playerPosRef, placed, crops, mode, seedColor, onCollect }) 
     [collisionSet]
   );
 
-  const mergedCells = useMemo(() => {
-    const out = [];
-    const placedList = Object.values(placed);
-    for (let i = 0; i < placedList.length; i++) {
-      const p = placedList[i];
-      const def = BLOCKS.find((b) => b.id === p.id);
-      out.push({ x: p.x, y: p.y, z: p.z, c: def ? def.c : C.dirt });
-    }
-    return STATIC_WORLD.cells.concat(out);
-  }, [placed]);
+  const mergedCells = world.cells;
 
   useFrame(() => {
     const p = playerPosRef.current;
@@ -658,6 +781,7 @@ function GameScene({ playerPosRef, placed, crops, mode, seedColor, onCollect }) 
       crops,
       mode,
       occSet,
+      groundTop: world.groundTop,
     });
     worldShared.front = ghost;
     worldShared.ghost = ghost;
@@ -671,6 +795,7 @@ function GameScene({ playerPosRef, placed, crops, mode, seedColor, onCollect }) 
         <VoxelPlayer
           positionRef={playerPosRef}
           seedColor={seedColor}
+          initialPosition={spawn ? [spawn.x, FEET_Y, spawn.z] : [0, FEET_Y, 8]}
           solidAt={solidAt}
         />
       </KeyboardControls>
@@ -809,6 +934,350 @@ function VoxelHUD({
   );
 }
 
+const makeQuestions = (cat, n) => {
+  const pool = cat ? QUESTIONS.filter((q) => q.cat === cat) : [...QUESTIONS];
+  return [...pool]
+    .sort(() => Math.random() - 0.5)
+    .slice(0, n)
+    .map((q) => {
+      const opts = q.opts.map((o, i) => ({ o, i })).sort(() => Math.random() - 0.5);
+      return { q: q.q, opts: opts.map((s) => s.o), a: opts.findIndex((s) => s.i === q.a) };
+    });
+};
+
+const Overlay = ({ title, onClose, children, wide }) => (
+  <div className="absolute inset-0 z-[96] bg-black/45 backdrop-blur-[2px] flex items-center justify-center p-4">
+    <div className={`w-full ${wide ? 'max-w-2xl' : 'max-w-lg'} bg-white rounded-2xl shadow-2xl overflow-hidden max-h-[92vh] overflow-y-auto`}>
+      <div className="sticky top-0 flex items-center justify-between px-5 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white">
+        <h2 className="font-bold text-sm">{title}</h2>
+        <button onClick={onClose} className="text-white/80 hover:text-white font-black text-lg leading-none px-1">✕</button>
+      </div>
+      <div className="p-4">{children}</div>
+    </div>
+  </div>
+);
+
+function DialogModal({ npc, text, onClose, actionLabel, onAction }) {
+  return (
+    <Overlay title={`${npc?.label === 'IARA' ? '🤖 IARA' : '🧑‍🏫'} ${npc?.label || 'Conversa'}`} onClose={onClose}>
+      <div className="flex gap-3">
+        <div
+          className={`w-12 h-12 rounded-xl shrink-0 flex items-center justify-center text-2xl ${npc?.label === 'IARA' ? 'bg-purple-600' : ''}`}
+          style={npc?.label !== 'IARA' ? { background: npc?.c || '#7C3AED' } : null}
+        >
+          {npc?.label === 'IARA' ? '🤖' : '🧑‍🏫'}
+        </div>
+        <div className="flex-1 space-y-3">
+          <p className="text-gray-700 text-sm leading-relaxed">{text}</p>
+          <div className="flex gap-2">
+            {actionLabel && (
+              <button
+                onClick={onAction}
+                className="px-3 py-1.5 rounded-lg bg-green-500 text-white text-xs font-bold hover:bg-green-400"
+              >
+                {actionLabel}
+              </button>
+            )}
+            <button onClick={onClose} className="px-3 py-1.5 rounded-lg bg-gray-200 text-gray-700 text-xs font-bold hover:bg-gray-300">
+              Sair
+            </button>
+          </div>
+        </div>
+      </div>
+    </Overlay>
+  );
+}
+
+function QuizModal({ title, questions, onCorrect, onDone }) {
+  const [idx, setIdx] = useState(0);
+  const [correct, setCorrect] = useState(0);
+  const [picked, setPicked] = useState(null);
+  const q = questions[idx];
+  if (!q) return null;
+  const answer = (i) => {
+    if (picked !== null) return;
+    setPicked(i);
+    const isRight = i === q.a;
+    if (isRight) {
+      setCorrect((c) => c + 1);
+      onCorrect && onCorrect();
+    }
+    setTimeout(() => {
+      setPicked(null);
+      if (idx + 1 >= questions.length) onDone(correct + (isRight ? 1 : 0));
+      else setIdx(idx + 1);
+    }, 900);
+  };
+  return (
+    <Overlay title={`${title} — ${idx + 1}/${questions.length}`} onClose={() => onDone(correct)}>
+      <p className="text-gray-800 font-semibold text-sm mb-3">{q.q}</p>
+      <div className="grid gap-2">
+        {q.opts.map((o, i) => {
+          let cls = 'bg-gray-100 hover:bg-indigo-100 border-gray-200 text-gray-800';
+          if (picked !== null) {
+            if (i === q.a) cls = 'bg-green-100 border-green-400 text-green-800';
+            else if (i === picked) cls = 'bg-red-100 border-red-400 text-red-700';
+            else cls = 'bg-gray-50 border-gray-200 text-gray-400';
+          }
+          return (
+            <button key={i} onClick={() => answer(i)} className={`text-left px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${cls}`}>
+              {o}
+            </button>
+          );
+        })}
+      </div>
+      {picked !== null && (
+        <p className="mt-3 text-center text-xs font-bold text-indigo-600">
+          {picked === q.a ? '✅ Certo! Recompensas aplicadas.' : `😢 Errou! Resposta certa: ${q.opts[q.a]}`}
+        </p>
+      )}
+    </Overlay>
+  );
+}
+
+function ArenaModal({ onClose, onFinish }) {
+  const [phase, setPhase] = useState('intro');
+  const [roundIdx, setRoundIdx] = useState(0);
+  const [qIdx, setQIdx] = useState(0);
+  const [score, setScore] = useState(0);
+  const [picked, setPicked] = useState(null);
+  const [timeLeft, setTimeLeft] = useState(15);
+  const locked = useRef(false);
+
+  const round = ARENA_ROUNDS[roundIdx];
+  const pool = useMemo(
+    () => (phase === 'q' || phase === 'between' ? makeQuestions(round.cat, round.n) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [phase, roundIdx]
+  );
+  const q = pool[qIdx];
+
+  useEffect(() => {
+    if (phase !== 'q' || picked !== null || timeLeft > 0) return;
+    resolve(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeLeft, phase, picked, qIdx]);
+
+  useEffect(() => {
+    if (phase !== 'q' || picked !== null) return;
+    const t = setTimeout(() => setTimeLeft((s) => (s > 0 ? s - 1 : 0)), 1000);
+    return () => clearTimeout(t);
+  }, [phase, picked, timeLeft]);
+
+  const resolve = (choice) => {
+    if (locked.current) return;
+    locked.current = true;
+    const isRight = choice !== null && choice === q.a;
+    if (choice !== null) setPicked(choice);
+    if (isRight) setScore((s) => s + 100);
+    setTimeout(() => {
+      locked.current = false;
+      if (qIdx + 1 >= round.n) {
+        if (roundIdx + 1 >= ARENA_ROUNDS.length) setPhase('results');
+        else { setRoundIdx(roundIdx + 1); setQIdx(0); setTimeLeft(15); setPicked(null); setPhase('between'); }
+      } else {
+        setQIdx(qIdx + 1); setTimeLeft(15); setPicked(null);
+      }
+    }, 900);
+  };
+
+  if (phase === 'intro') {
+    return (
+      <Overlay title="🏆 ARENA DO CONHECIMENTO" onClose={onClose} wide>
+        <div className="space-y-3">
+          <p className="text-sm text-gray-700">20 jogadores entram. Você corre contra rivais resolvendo desafios:</p>
+          <div className="grid grid-cols-2 gap-2">
+            {ARENA_ROUNDS.map((r) => (
+              <div key={r.name} className="bg-indigo-50 rounded-xl px-3 py-2">
+                <p className="text-xs font-bold text-indigo-700">{r.icon || '🧠'} {r.name}</p>
+                <p className="text-[11px] text-gray-500">{r.n} questões</p>
+              </div>
+            ))}
+          </div>
+          <button
+            onClick={() => { setPhase('between'); setRoundIdx(0); setQIdx(0); setTimeLeft(15); setPicked(null); }}
+            className="w-full px-4 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white font-bold text-sm hover:opacity-90"
+          >
+            🏁 Entrar na Arena
+          </button>
+        </div>
+      </Overlay>
+    );
+  }
+
+  if (phase === 'between') {
+    return (
+      <Overlay title={`R${roundIdx + 1}: ${round.name}`} onClose={onClose} wide>
+        <div className="space-y-3 text-center">
+          <p className="text-3xl font-black text-indigo-700">{ROUND_ICONS[round.name] || '🧠'}</p>
+          <p className="font-bold text-gray-800">{round.name}</p>
+          <p className="text-xs text-gray-500">Placar parcial: {score} pts</p>
+          <button
+            onClick={() => { setPhase('q'); }}
+            className="px-6 py-3 rounded-xl bg-green-500 text-white font-bold text-sm hover:bg-green-400"
+          >
+            Começar rodada
+          </button>
+        </div>
+      </Overlay>
+    );
+  }
+
+  if (phase === 'results') {
+    const rivals = [1500, 1100, 700];
+    const rank = rivals.filter((r) => r > score).length + 1;
+    return (
+      <Overlay title="🏆 RESULTADO" onClose={onClose} wide>
+        <div className="space-y-3 text-center">
+          <p className={`text-5xl ${rank === 1 ? 'text-amber-500' : 'text-gray-500'}`}>{rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : '🎖️'}</p>
+          <p className="text-xl font-black text-gray-800">{rank}º lugar! — {score} pts</p>
+          <div className="text-xs text-gray-600 space-y-1">
+            <p>🏅 Você: {score}</p>
+            {rivals.map((r, i) => (
+              <p key={i} className="text-gray-400">🥉 Rival {i + 1}: {r}</p>
+            ))}
+          </div>
+          <button
+            onClick={() => onFinish(rank, score)}
+            className="px-6 py-3 rounded-xl bg-green-500 text-white font-bold text-sm hover:bg-green-400"
+          >
+            Coletar prêmio
+          </button>
+        </div>
+      </Overlay>
+    );
+  }
+
+  return (
+    <Overlay title={`${round.name} — ${qIdx + 1}/${round.n}`} onClose={onClose} wide>
+      <div className="mb-2 h-2 bg-gray-100 rounded-full overflow-hidden">
+        <div className="h-full bg-gradient-to-r from-red-400 to-orange-400" style={{ width: `${(timeLeft / 15) * 100}%` }} />
+      </div>
+      <p className="text-[11px] text-right font-bold text-gray-500 mb-2">{timeLeft}s · {score} pts</p>
+      <p className="text-gray-800 font-semibold text-sm mb-3">{q?.q}</p>
+      <div className="grid gap-2">
+        {q?.opts.map((o, i) => {
+          let cls = 'bg-gray-100 hover:bg-indigo-100 border-gray-200 text-gray-800';
+          if (picked !== null) {
+            if (i === q.a) cls = 'bg-green-100 border-green-400 text-green-800';
+            else if (i === picked) cls = 'bg-red-100 border-red-400 text-red-700';
+            else cls = 'bg-gray-50 border-gray-200 text-gray-400';
+          }
+          return (
+            <button key={i} onClick={() => resolve(i)} className={`text-left px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${cls}`}>
+              {o}
+            </button>
+          );
+        })}
+      </div>
+    </Overlay>
+  );
+}
+
+const ROUND_ICONS = { 'Frações': '🍕', 'Porcentagem': '💯', 'Geometria': '📐', 'Desafio Mestre': '👑' };
+
+function BridgeModal({ planks, materials, onBuild, onClose, allDone }) {
+  const cost = BRIDGE.plankCost;
+  const next = planks.findIndex((p) => !p);
+  return (
+    <Overlay title="🌉 Canteiro da Ponte" onClose={onClose}>
+      <div className="space-y-3">
+        <p className="text-sm text-gray-700">
+          Reconstrua a ponte para a <b>Cidade da Matemática</b>. Cada prancha usa materiais conquistados em Desafios.
+        </p>
+        <div className="flex gap-1.5">
+          {BRIDGE.span.map((z, i) => (
+            <div key={z} className={`flex-1 h-3 rounded ${planks[i] ? 'bg-green-500' : 'bg-gray-200'}`} title={`Prancha ${i + 1}`} />
+          ))}
+        </div>
+        <p className="text-[11px] text-gray-500 text-center">{planks.filter(Boolean).length}/3 pranchas</p>
+        <div className="grid grid-cols-3 gap-2">
+          {MATERIALS.map((m) => (
+            <div key={m.id} className="bg-gray-100 rounded-xl px-2 py-2 text-center">
+              <p className="text-lg">{m.icon}</p>
+              <p className="text-[11px] font-bold text-gray-700">{materials[m.id] || 0}</p>
+              <p className="text-[9px] text-gray-500">{m.name}</p>
+            </div>
+          ))}
+        </div>
+        <p className="text-[11px] text-gray-600">
+          Custo por prancha: 🪵×{cost.madeira} 🪨×{cost.pedra} 🧱×{cost.blocos}
+        </p>
+        {!allDone && next !== -1 ? (
+          <button
+            onClick={onBuild}
+            className="w-full px-4 py-3 rounded-xl bg-green-500 text-white font-bold text-sm hover:bg-green-400 disabled:opacity-40"
+            disabled={materials.madeira < cost.madeira || materials.pedra < cost.pedra || materials.blocos < cost.blocos}
+          >
+            🔨 Construir prancha {next + 1}
+          </button>
+        ) : (
+          <p className="text-center font-bold text-green-600">Ponte reconstruída! Atravesse-a. 🎉</p>
+        )}
+      </div>
+    </Overlay>
+  );
+}
+
+function InventoryModal({ blocks, materials, seeds, farm, onClose }) {
+  return (
+    <Overlay title="🎒 Inventário" onClose={onClose} wide>
+      <p className="text-[11px] font-bold uppercase text-gray-400 mb-1">Materiais de construção</p>
+      <div className="grid grid-cols-3 gap-2 mb-4">
+        {MATERIALS.map((m) => (
+          <div key={m.id} className="bg-amber-50 rounded-xl px-2 py-2 text-center border border-amber-200">
+            <p className="text-lg">{m.icon}</p>
+            <p className="text-sm font-bold text-gray-800">{materials[m.id] || 0}</p>
+            <p className="text-[10px] text-gray-500">{m.name}</p>
+          </div>
+        ))}
+      </div>
+      <p className="text-[11px] font-bold uppercase text-gray-400 mb-1">Blocos</p>
+      <div className="grid grid-cols-4 gap-2 mb-4">
+        {BLOCKS.map((b) => (
+          <div key={b.id} className="rounded-xl p-2 text-center border border-gray-200">
+            <p className="w-5 h-5 mx-auto rounded-sm mb-1" style={{ background: b.c }} />
+            <p className="text-[11px] font-bold text-gray-700">{blocks[b.id] || 0}</p>
+            <p className="text-[9px] text-gray-500">{b.name}</p>
+          </div>
+        ))}
+      </div>
+      <p className="text-[11px] font-bold uppercase text-gray-400 mb-1">Sementes</p>
+      <div className="grid grid-cols-3 gap-2">
+        {seeds.map((s) => (
+          <div key={s.id} className="rounded-xl p-2 text-center border border-gray-200">
+            <p className="w-5 h-5 mx-auto rounded-sm mb-1" style={{ background: CROP_COLORS[s.id] }} />
+            <p className="text-[11px] font-bold text-gray-700">{(farm?.inventories?.sementes?.[s.id] || 0)}</p>
+            <p className="text-[9px] text-gray-500">{s.name}</p>
+          </div>
+        ))}
+      </div>
+    </Overlay>
+  );
+}
+
+function MapModal({ playerPos, planks, cityUnlocked, onClose, arenaDone }) {
+  const w = 200, h = 160;
+  const toXY = (x, z) => ({ x: 100 + (x / 36) * 90, y: 80 - (z / 36) * 70 });
+  const p = toXY(playerPos.x, playerPos.z);
+  return (
+    <Overlay title="🗺️ Mapa da Fazenda do Conhecimento" onClose={onClose} wide>
+      <div className="relative w-full h-40 rounded-xl bg-gradient-to-b from-green-200 to-green-100 border border-gray-300" style={{ height: h, minHeight: h }}>
+        <div className="absolute left-px top-0 bottom-0 w-2 bg-white/70" style={{ left: 100 }} />
+        <div className="absolute bottom-0 h-2 bg-blue-300/80" style={{ left: 0, right: 0, bottom: 50 }} title="Rio" />
+        <div className="absolute h-1.5 bg-amber-600 rounded" style={{ ...toXY(0, 23.5), width: 26, transform: 'translate(-50%,-50%)' }} title="Ponte" />
+        <div className="absolute w-3 h-3 bg-indigo-500 rounded-sm" style={{ ...toXY(0, 30), transform: 'translate(-50%,-50%)' }} title="Cidade da Matemática" />
+        <div className="absolute w-2.5 h-2.5 bg-orange-400 rounded-full" style={{ ...toXY(ARENA.npc.x, ARENA.npc.z), transform: 'translate(-50%,-50%)' }} title="Arena" />
+        <div className="absolute w-3 h-3 bg-green-700 rounded-full" style={{ ...toXY(0, 8), transform: 'translate(-50%,-50%)' }} title="Spawn" />
+        <div className="absolute w-3 h-3 bg-yellow-300 rounded-full border border-black/30" style={{ ...p, transform: 'translate(-50%,-50%)' }} title="Você" />
+        <p className="absolute bottom-1 left-1/2 -translate-x-1/2 text-[9px] font-bold text-gray-600">
+          {cityUnlocked ? 'Cidade da Matemática desbloqueada' : `Ponte ${planks.filter(Boolean).length}/3 ${arenaDone ? '· Arena ' : ''}`}
+        </p>
+      </div>
+    </Overlay>
+  );
+}
+
 const LoadingScreen = () => (
   <div className="fixed inset-0 z-[100] bg-gradient-to-b from-blue-400 to-green-400 flex flex-col items-center justify-center">
     <div className="text-6xl mb-4">🧱</div>
@@ -819,6 +1288,22 @@ const LoadingScreen = () => (
     </div>
   </div>
 );
+
+const defaultStory = () => ({
+  iaraDialogSeen: false,
+  planks: [false, false, false],
+  cityUnlocked: false,
+  arenaDone: false,
+  arenaBest: 0,
+});
+
+const spawnFromHash = () => {
+  try {
+    const m = /[?&#]pos=(-?[\d.]+),(-?[\d.]+)/.exec(window.location.href);
+    if (m) return { x: parseFloat(m[1]), z: parseFloat(m[2]) };
+  } catch (e) {}
+  return null;
+};
 
 const GameWorld = ({ onClose, seedColor }) => {
   const { user } = useAuth();
@@ -831,13 +1316,15 @@ const GameWorld = ({ onClose, seedColor }) => {
   const [notifications, setNotifications] = useState([]);
   const [farm, setFarm] = useState(null);
 
-  const playerPosRef = useRef(new THREE.Vector3(0, FEET_Y, 8));
+  const spawn = spawnFromHash();
+  const playerPosRef = useRef(new THREE.Vector3(spawn?.x ?? 0, FEET_Y, spawn?.z ?? 8));
+  const [posSnapshot, setPosSnapshot] = useState({ x: spawn?.x ?? 0, z: spawn?.z ?? 8 });
 
   const [page, setPage] = useState(0);
   const [blockOffset, setBlockOffset] = useState(0);
   const [slot, setSlot] = useState(0);
 
-  const initialState = useMemo(() => {
+  const parseSaved = () => {
     try {
       const raw = localStorage.getItem(storageKey);
       if (raw) {
@@ -846,24 +1333,33 @@ const GameWorld = ({ onClose, seedColor }) => {
           placed: parsed.placed || {},
           crops: parsed.crops || {},
           blocks: parsed.blocks || START_KIT,
+          materials: { ...START_MATERIALS, ...(parsed.materials || {}) },
+          story: { ...defaultStory(), ...(parsed.story || {}) },
         };
       }
     } catch (e) {}
-    return { placed: {}, crops: {}, blocks: START_KIT };
-  }, [storageKey]);
+    return { placed: {}, crops: {}, blocks: START_KIT, materials: { ...START_MATERIALS }, story: defaultStory() };
+  };
+  const [saved] = useState(parseSaved);
 
-  const [placed, setPlaced] = useState(initialState.placed);
-  const [crops, setCrops] = useState(initialState.crops);
-  const [blocks, setBlocks] = useState(initialState.blocks);
+  const [placed, setPlaced] = useState(saved.placed);
+  const [crops, setCrops] = useState(saved.crops);
+  const [blocks, setBlocks] = useState(saved.blocks);
+  const [materials, setMaterials] = useState(saved.materials);
+  const [story, setStory] = useState(saved.story);
+
+  const [modal, setModal] = useState(null);
+  const [dialogNpc, setDialogNpc] = useState(null);
+  const worldRef = useRef(null);
 
   useEffect(() => {
     try {
-      localStorage.setItem(storageKey, JSON.stringify({ placed, crops, blocks }));
+      localStorage.setItem(storageKey, JSON.stringify({ placed, crops, blocks, materials, story }));
     } catch (e) {}
-  }, [placed, crops, blocks, storageKey]);
+  }, [placed, crops, blocks, materials, story, storageKey]);
 
   useEffect(() => {
-    const t = setTimeout(() => setLoaded(true), 1500);
+    const t = setTimeout(() => setLoaded(true), 1200);
     return () => clearTimeout(t);
   }, []);
 
@@ -887,34 +1383,59 @@ const GameWorld = ({ onClose, seedColor }) => {
   }, [user]);
 
   useEffect(() => {
-    const handler = (e) => {
-      const code = e.code;
-      if (code === 'KeyF') { e.preventDefault(); handlePrimaryRef.current(); return; }
-      if (code === 'KeyR') { e.preventDefault(); handleRemoveRef.current(); return; }
-      if (code === 'KeyE') { e.preventDefault(); handleHarvestRef.current(); return; }
-      if (code === 'Tab' || code === 'KeyQ') {
-        e.preventDefault();
-        setPage((p) => (p === 0 ? 1 : 0));
-        setSlot(0);
-        return;
+    worldRef.current = buildMultiWorld({ placed, crops, progress: story });
+  }, [placed, crops, story]);
+
+  useEffect(() => {
+    if (!loaded || story.iaraDialogSeen || modal) return;
+    const t = setTimeout(() => {
+      setDialogNpc({ p: [0, -9], c: '#7C3AED', label: 'IARA' });
+      setModal({ type: 'dialog' });
+      setStory((s) => ({ ...s, iaraDialogSeen: true }));
+    }, 2200);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, story.iaraDialogSeen]);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      const p = playerPosRef.current;
+      if (!p) return;
+      setPosSnapshot({ x: p.x, z: p.z });
+      if (p.z > CITY.entranceZ && !story.cityUnlocked && story.planks.every(Boolean)) {
+        setStory((s) => ({ ...s, cityUnlocked: true }));
+        pushToast('🎉 NOVA REGIÃO DESBLOQUEADA: Cidade da Matemática!');
+        if (userEmail) {
+          const r = awardReward(userEmail, 'ACTIVITY_COMPLETE');
+          setXp((v) => v + (r?.xpGain || 0));
+          setCoins((v) => v + (r?.coinGain || 0));
+        }
       }
-      if (/^Digit[1-9]$/.test(code)) {
-        setSlot(Number(code.slice(5)) - 1);
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, []);
+    }, 600);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [story.cityUnlocked, story.planks]);
 
   const pushToast = (text) => {
     setNotifications((p) => [...p, { id: Date.now() + Math.random(), text }]);
     setTimeout(() => setNotifications((p) => p.slice(1)), 2600);
   };
 
-  const selectedBlock = () => BLOCKS[(blockOffset + slot) % BLOCKS.length];
-  const selectedSeed = () => {
-    const seedList = CROPS.filter((c) => (farm?.level || 1) >= (c.level || 1));
-    return seedList[slot] || seedList[0] || null;
+  const applyAward = (label, r) => {
+    if (!r) return;
+    setXp((p) => p + (r.xpGain || 0));
+    setCoins((p) => p + (r.coinGain || 0));
+    pushToast(`${label} +${r.xpGain || 0} XP +${r.coinGain || 0} 🪙`);
+  };
+
+  const grantChallenge = () => {
+    if (userEmail) applyAward('✅ Desafio:', awardReward(userEmail, 'QUESTION_CORRECT'));
+    setMaterials((m) => ({
+      madeira: m.madeira + CHALLENGE_REWARD_MATERIALS.madeira,
+      pedra: m.pedra + CHALLENGE_REWARD_MATERIALS.pedra,
+      blocos: m.blocos + CHALLENGE_REWARD_MATERIALS.blocos,
+    }));
+    pushToast('+🪵 Madeira +🪨 Pedra +🧱 Blocos');
   };
 
   const handleCollect = (type) => {
@@ -930,7 +1451,6 @@ const GameWorld = ({ onClose, seedColor }) => {
     setCoins((p) => p + r.coins);
     pushToast(`${r.label} +🧱`);
     if (userEmail) awardReward(userEmail, 'WORLD_COLLECT', { extraXp: r.xp, extraCoins: r.coins, item: type });
-
     const extra = BLOCKS[Math.floor(Math.random() * BLOCKS.length)];
     setBlocks((prev) => ({ ...prev, [extra.id]: (prev[extra.id] || 0) + 3 }));
   };
@@ -944,6 +1464,7 @@ const GameWorld = ({ onClose, seedColor }) => {
       placed,
       crops,
       mode: page === 0 ? 'build' : 'plant',
+      groundTop: worldRef.current?.groundTop,
     });
   };
 
@@ -1018,19 +1539,179 @@ const GameWorld = ({ onClose, seedColor }) => {
     else doPlant();
   };
 
+  const buildNextPlank = () => {
+    const planks = story.planks.slice();
+    const idx = planks.findIndex((p) => !p);
+    if (idx === -1) return;
+    const cost = BRIDGE.plankCost;
+    if (materials.madeira < cost.madeira || materials.pedra < cost.pedra || materials.blocos < cost.blocos) {
+      pushToast('Materiais insuficientes. Aceite Desafios com a IARA!');
+      return;
+    }
+    setMaterials((m) => ({
+      madeira: m.madeira - cost.madeira,
+      pedra: m.pedra - cost.pedra,
+      blocos: m.blocos - cost.blocos,
+    }));
+    planks[idx] = true;
+    setStory((s) => ({ ...s, planks }));
+    pushToast(`🌉 Prancha ${idx + 1}/3 construída!`);
+    if (planks.every(Boolean)) {
+      pushToast('✅ PONTE RECONSTRUÍDA! Atravesse para a Cidade da Matemática.');
+      if (userEmail) applyAward('🏆 Missão concluída:', awardReward(userEmail, 'MISSION_COMPLETE'));
+    }
+  };
+
+  const doInteract = () => {
+    if (modal) return;
+    const g = frontNow();
+    const cropAt = g && g.purpose === 'harvest' ? crops[toKey(g.x, g.y, g.z)] : null;
+    if (cropAt) { doHarvest(); return; }
+    const p = playerPosRef.current;
+    const targets = NPCS.map((n) => ({ x: n.p[0], z: n.p[1], kind: 'npc', label: n.label })).concat([
+      { x: WORKSITE.x, z: WORKSITE.z, kind: 'site', label: WORKSITE.label },
+    ]);
+    let best = null;
+    let bestD = 3.6 * 3.6;
+    targets.forEach((t) => {
+      const d = (p.x - t.x) ** 2 + (p.z - t.z) ** 2;
+      if (d < bestD) { bestD = d; best = t; }
+    });
+    if (!best) { pushToast('🤷 Nada para interagir aqui. Procure a IARA na praça.'); return; }
+    if (best.kind === 'site') {
+      if (story.planks.every(Boolean)) { pushToast('🌉 Ponte reconstruída! Atravesse para a cidade.'); return; }
+      setModal({ type: 'bridge' });
+      return;
+    }
+    const npc = NPCS.find((n) => n.label === best.label);
+    setDialogNpc(npc);
+    setModal({ type: 'dialog' });
+  };
+
+  const handleInteractRef = useRef(doInteract);
   const handlePrimaryRef = useRef(handlePrimary);
   const handleRemoveRef = useRef(doRemove);
   const handleHarvestRef = useRef(doHarvest);
   useEffect(() => {
+    handleInteractRef.current = doInteract;
     handlePrimaryRef.current = handlePrimary;
     handleRemoveRef.current = doRemove;
     handleHarvestRef.current = doHarvest;
   });
 
+  useEffect(() => {
+    const handler = (e) => {
+      const code = e.code;
+      if (modal) {
+        if (code === 'Tab' || code === 'KeyM' || code === 'KeyQ' || code === 'Escape') {
+          e.preventDefault();
+          setModal(null);
+        }
+        return;
+      }
+      if (code === 'KeyF') { e.preventDefault(); handlePrimaryRef.current(); return; }
+      if (code === 'KeyR') { e.preventDefault(); handleRemoveRef.current(); return; }
+      if (code === 'KeyE') { e.preventDefault(); handleInteractRef.current(); return; }
+      if (code === 'Tab') { e.preventDefault(); setModal({ type: 'inventory' }); return; }
+      if (code === 'KeyM') { e.preventDefault(); setModal({ type: 'map' }); return; }
+      if (code === 'KeyQ') {
+        e.preventDefault();
+        setPage((p) => (p === 0 ? 1 : 0));
+        setSlot(0);
+        return;
+      }
+      if (/^Digit[1-9]$/.test(code)) {
+        setSlot(Number(code.slice(5)) - 1);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modal]);
+
+  const selectedBlock = () => BLOCKS[(blockOffset + slot) % BLOCKS.length];
+  const selectedSeed = () => {
+    const seedList = CROPS.filter((c) => (farm?.level || 1) >= (c.level || 1));
+    return seedList[slot] || seedList[0] || null;
+  };
+
   const seeds = useMemo(
     () => CROPS.map((c) => ({ ...c, count: farm?.inventories?.sementes?.[c.id] || 0 })),
     [farm]
   );
+
+  const renderModal = () => {
+    switch (modal?.type) {
+      case 'dialog': {
+        const npc = dialogNpc;
+        const text = npc?.label === 'IARA' && story.planks.every(Boolean)
+          ? 'Incrível! A ponte está reconstruída. A Cidade da Matemática agora está aberta para você! 🎉'
+          : (NPC_DIALOGS[npc?.label] || 'Olá! Explore a Fazenda do Conhecimento.');
+        const action =
+          npc?.label === 'IARA' || npc?.label === 'Professor' || npc?.label === 'CityTeacher'
+            ? { label: 'Aceitar Desafio 🤔', open: 'challenge' }
+            : npc?.label === 'ArenaReferee'
+              ? { label: '🏆 Iniciar Arena', open: 'arena' }
+              : null;
+        return (
+          <DialogModal
+            npc={npc}
+            text={text}
+            onClose={() => setModal(null)}
+            actionLabel={action?.label}
+            onAction={() => setModal(action ? { type: action.open, title: `Desafio — ${npc.label}` } : null)}
+          />
+        );
+      }
+      case 'challenge':
+        return (
+          <QuizModal
+            title={modal.title || 'Desafio Matemático'}
+            questions={makeQuestions(null, 3)}
+            onCorrect={grantChallenge}
+            onDone={() => setModal(null)}
+          />
+        );
+      case 'bridge':
+        return (
+          <BridgeModal
+            planks={story.planks}
+            materials={materials}
+            onBuild={buildNextPlank}
+            onClose={() => setModal(null)}
+            allDone={story.planks.every(Boolean)}
+          />
+        );
+      case 'arena':
+        return (
+          <ArenaModal
+            onClose={() => setModal(null)}
+            onFinish={(rank, score) => {
+              const r = awardReward(userEmail, 'WORLD_COLLECT', { extraXp: rank === 1 ? 90 : 45, extraCoins: rank === 1 ? 30 : 15 });
+              applyAward(`🏆 Arena: ${rank}º lugar!`, r);
+              setStory((s) => ({ ...s, arenaDone: true, arenaBest: Math.max(s.arenaBest || 0, score) }));
+              setModal(null);
+            }}
+          />
+        );
+      case 'inventory':
+        return (
+          <InventoryModal blocks={blocks} materials={materials} seeds={seeds} farm={farm} onClose={() => setModal(null)} />
+        );
+      case 'map':
+        return (
+          <MapModal
+            playerPos={posSnapshot}
+            planks={story.planks}
+            cityUnlocked={story.cityUnlocked}
+            arenaDone={story.arenaDone}
+            onClose={() => setModal(null)}
+          />
+        );
+      default:
+        return null;
+    }
+  };
 
   if (!loaded) return <LoadingScreen />;
 
@@ -1043,17 +1724,25 @@ const GameWorld = ({ onClose, seedColor }) => {
         ← Sair do Mundo 3D
       </button>
 
-      <HUD xp={xp} coins={coins} notifications={notifications} />
+      <HUD
+        xp={xp}
+        coins={coins}
+        notifications={notifications}
+        materials={materials}
+        bridgeProgress={story.planks.filter(Boolean).length}
+        bridgeTotal={BRIDGE.span.length}
+        cityUnlocked={story.cityUnlocked}
+      />
 
       <div className="hidden md:block absolute top-4 left-1/2 -translate-x-1/2 z-[95] bg-black/50 text-white/70 text-[11px] px-3 py-2 rounded-lg backdrop-blur-sm text-center">
         <p>
           <kbd className="bg-white/20 px-1 rounded">WASD</kbd> Mover · <kbd className="bg-white/20 px-1 rounded">SHIFT</kbd> Correr ·{' '}
-          <kbd className="bg-white/20 px-1 rounded">ESPAÇO</kbd> Pular
+          <kbd className="bg-white/20 px-1 rounded">ESPAÇO</kbd> Pular · <kbd className="bg-white/20 px-1 rounded">C</kbd> Agachar
         </p>
         <p className="mt-1">
           <kbd className="bg-white/20 px-1 rounded">F</kbd> Colocar/Plantar · <kbd className="bg-white/20 px-1 rounded">R</kbd> Remover ·{' '}
-          <kbd className="bg-white/20 px-1 rounded">E</kbd> Colher · <kbd className="bg-white/20 px-1 rounded">TAB</kbd> Pagina ·{' '}
-          <kbd className="bg-white/20 px-1 rounded">1-9</kbd> Selecionar
+          <kbd className="bg-white/20 px-1 rounded">E</kbd> Colher/Interagir · <kbd className="bg-white/20 px-1 rounded">Q</kbd> Página ·{' '}
+          <kbd className="bg-white/20 px-1 rounded">TAB</kbd> Inventário · <kbd className="bg-white/20 px-1 rounded">M</kbd> Mapa
         </p>
       </div>
 
@@ -1080,6 +1769,12 @@ const GameWorld = ({ onClose, seedColor }) => {
         >
           RUN
         </button>
+        <button
+          onTouchStart={(e) => { e.preventDefault(); handleInteractRef.current(); }}
+          className="w-14 h-14 rounded-full bg-green-500/80 border-2 border-white/30 text-white text-xl font-bold backdrop-blur-sm active:bg-green-500"
+        >
+          ✋
+        </button>
       </div>
 
       <VoxelHUD
@@ -1095,6 +1790,8 @@ const GameWorld = ({ onClose, seedColor }) => {
         onPrimary={handlePrimary}
         onRemove={doRemove}
       />
+
+      {renderModal()}
 
       <GameErrorBoundary>
         <Canvas
@@ -1112,6 +1809,7 @@ const GameWorld = ({ onClose, seedColor }) => {
             mode={page === 0 ? 'build' : 'plant'}
             seedColor={seedColor || user?.email}
             onCollect={handleCollect}
+            progress={story}
           />
         </Canvas>
       </GameErrorBoundary>
