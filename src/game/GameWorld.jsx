@@ -1,4 +1,4 @@
-import React, { Suspense, useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { KeyboardControls, useKeyboardControls } from '@react-three/drei';
 import * as THREE from 'three';
@@ -8,15 +8,20 @@ import GameErrorBoundary from './components/GameErrorBoundary';
 import { awardReward } from '@/lib/gamification';
 import { useAuth } from '@/lib/AuthContext';
 import { touchInput, setTouchInput } from './input';
+import { getOrCreateFarm, getFarmFor, plantCrop, harvestCrop, advanceFarmDay } from '@/api/farm';
+import { CROPS } from '@/api/integrations';
 
-// ─── WORLD CONSTANTS ─────────────────────────────────────────────
 const GRAVITY = -20;
 const JUMP_FORCE = 8;
 const WALK_SPEED = 4;
 const RUN_SPEED = 8;
 const PLAYER_HEIGHT = 1.6;
+const GROUND_TOP = 0.5;
+const FEET_Y = GROUND_TOP + PLAYER_HEIGHT / 2;
+const WORLD_BOUNDS = 36;
+const INSTANCE_CAP = 8000;
+const PICK_RANGE = 1.9;
 
-// ─── KEYBOARD MAP ────────────────────────────────────────────────
 const keyMap = [
   { name: 'forward', keys: ['KeyW', 'ArrowUp'] },
   { name: 'backward', keys: ['KeyS', 'ArrowDown'] },
@@ -24,19 +29,408 @@ const keyMap = [
   { name: 'right', keys: ['KeyD', 'ArrowRight'] },
   { name: 'run', keys: ['ShiftLeft', 'ShiftRight'] },
   { name: 'jump', keys: ['Space'] },
-  { name: 'interact', keys: ['KeyE'] },
 ];
 
-// ─── THIRD PERSON CAMERA ─────────────────────────────────────────
+const toKey = (x, y, z) => `${x},${y},${z}`;
+
+const C = {
+  grass: '#6FBE5E',
+  grassDark: '#5AA04B',
+  dirt: '#8B5A2B',
+  stone: '#9A9A9A',
+  road: '#BCA268',
+  wood: '#6B4226',
+  plank: '#C89B6E',
+  brick: '#B3512A',
+  roof: '#8E5B2F',
+  leaf: '#3D8B37',
+  leafDark: '#32742E',
+  water: '#4FC3F7',
+  glass: '#B8E6FF',
+  snow: '#F2F6F8',
+  gold: '#FFD700',
+  obsidian: '#2B2B45',
+  sand: '#E8D5A3',
+  fence: '#7A5230',
+};
+
+const GLASSY = new Set([C.water, C.glass]);
+
+const BLOCKS = [
+  { id: 'terra', name: 'Terra', c: C.dirt },
+  { id: 'grama', name: 'Grama', c: C.grass },
+  { id: 'madeira', name: 'Madeira', c: C.wood },
+  { id: 'tabuas', name: 'Tábuas', c: C.plank },
+  { id: 'pedra', name: 'Pedra', c: C.stone },
+  { id: 'tijolo', name: 'Tijolo', c: C.brick },
+  { id: 'folha', name: 'Folha', c: C.leaf },
+  { id: 'areia', name: 'Areia', c: C.sand },
+  { id: 'vidro', name: 'Vidro', c: C.glass },
+  { id: 'neve', name: 'Neve', c: C.snow },
+  { id: 'ouro', name: 'Ouro', c: C.gold },
+  { id: 'obsidiana', name: 'Obsidiana', c: C.obsidian },
+];
+
+const START_KIT = {
+  terra: 48, grama: 24, madeira: 24, tabuas: 24, pedra: 24,
+  tijolo: 16, folha: 24, areia: 16, vidro: 8, neve: 12, ouro: 4, obsidiana: 2,
+};
+
+const CROP_COLORS = {
+  milho: '#F0C64A', trigo: '#D9B36A', cenoura: '#E8813B',
+  alface: '#63B85B', cafe: '#C05E3A', cacau: '#7A4A2B',
+};
+
+const BUILDINGS = [
+  { p: [-15, -15], w: 5, d: 4, h: 3, wall: C.plank, roof: C.wood },
+  { p: [0, -13], w: 6, d: 5, h: 4, wall: '#5DADE2', roof: '#3A7BC8' },
+  { p: [12, -10], w: 5, d: 4, h: 3, wall: C.wood, roof: C.roof },
+  { p: [20, -5], w: 5, d: 5, h: 4, wall: '#58C08B', roof: '#27AE60' },
+  { p: [-12, 10], w: 7, d: 5, h: 2, wall: C.gold, roof: C.brick },
+  { p: [8, 12], w: 5, d: 4, h: 3, wall: '#E07B3A', roof: '#C94F1D' },
+  { p: [18, 10], w: 4, d: 4, h: 3, wall: '#E8A33D', roof: C.roof },
+  { p: [-20, -5], w: 5, d: 4, h: 3, wall: '#C89B6E', roof: C.wood },
+  { p: [25, -15], w: 5, d: 5, h: 4, wall: '#A66BC4', roof: '#8E44AD' },
+];
+
+const TREES = [
+  [-29, -29], [-25, 20], [29, -25], [29, 25], [-29, 5],
+  [0, 29], [-20, 25], [25, -29], [-8, 20], [15, 25],
+  [5, -20], [-28, 8], [22, 22], [-5, -28], [27, -7],
+];
+
+const MOUNTAINS = [
+  { p: [-29, -29], r: 6, h: 8 },
+  { p: [30, -29], r: 6, h: 9 },
+  { p: [29, 30], r: 5, h: 7 },
+  { p: [-30, 31], r: 4, h: 5 },
+];
+
+const LAKE = { x0: 26, x1: 30, z0: 20, z1: 24 };
+
+const COLLECTIBLES = [
+  { id: 'coin', type: 'coin', p: [-5, 1, -5], c: C.gold },
+  { id: 'gem', type: 'gem', p: [8, 1, -3], c: '#4FC3F7' },
+  { id: 'heart', type: 'heart', p: [-8, 1, 8], c: '#FF6B6B' },
+  { id: 'seed', type: 'seed', p: [15, 1, -8], c: '#4CAF50' },
+  { id: 'star', type: 'star', p: [-15, 1, -8], c: '#B39DDB' },
+];
+
+const NPCS = [
+  { p: [0, -9], c: '#7C3AED', label: 'IARA' },
+  { p: [2, -9], c: '#4A90D9', label: 'Professor' },
+  { p: [-10, 12], c: '#8B6914', label: 'Agricultor' },
+  { p: [15, 12], c: '#E67E22', label: 'Mercador' },
+];
+
+const worldShared = { front: null, ghost: { x: 0, y: 0, z: 0, ok: false, color: '#ffffff', visible: false }, rot: 0 };
+
+const makeOccSet = (placed, crops) => {
+  const set = new Set(STATIC_WORLD.occKeys);
+  Object.keys(placed).forEach((k) => set.add(k));
+  Object.keys(crops).forEach((k) => set.add(k));
+  return set;
+};
+
+function computeFront({ px, pz, rot, placed, crops, mode, occSet }) {
+  const dirX = Math.sin(rot);
+  const dirZ = Math.cos(rot);
+  const fx = Math.round(px + dirX * PICK_RANGE);
+  const fz = Math.round(pz + dirZ * PICK_RANGE);
+  if (fx < -37 || fx > 37 || fz < -37 || fz > 37) return { x: fx, y: 1, z: fz, ok: false, purpose: 'none', color: '#ffffff' };
+  const groundId = STATIC_WORLD.groundTop.get(`${fx},${fz}`);
+  const occ = occSet || makeOccSet(placed, crops);
+
+  const crop = crops[toKey(fx, 1, fz)];
+  if (crop) {
+    const def = CROPS.find((c) => c.id === crop.cropId);
+    const mature = Date.now() - crop.plantedAt >= (def?.time || 60) * 1000;
+    return { x: fx, y: 1, z: fz, ok: true, purpose: 'harvest', mature, color: mature ? '#FFD700' : '#9E9E9E' };
+  }
+
+  if (mode === 'plant') {
+    const okGround = groundId === 'grass' || groundId === 'dirt';
+    const occupied = occ.has(toKey(fx, 1, fz));
+    return {
+      x: fx, y: 1, z: fz, ok: okGround && !occupied,
+      color: okGround && !occupied ? '#4CAF50' : '#E74C3C', purpose: 'plant',
+    };
+  }
+
+  if (mode === 'build') {
+    const placedHas = (y) => !!placed[toKey(fx, y, fz)];
+    let placeY = 1;
+    while (placeY <= 9 && occ.has(toKey(fx, placeY, fz))) placeY++;
+    let placedTop = -1;
+    for (let y = 9; y >= 1; y--) {
+      if (placedHas(y)) { placedTop = y; break; }
+    }
+    let staticTop = -1;
+    for (let y = 9; y >= 1; y--) {
+      if (STATIC_WORLD.occKeys.has(toKey(fx, y, fz))) { staticTop = y; break; }
+    }
+    if (placedTop > staticTop) {
+      return { x: fx, y: placedTop, z: fz, ok: true, purpose: 'break', color: '#E74C3C' };
+    }
+    const okGround = !!groundId && groundId !== 'water';
+    return { x: fx, y: Math.min(placeY, 10), z: fz, ok: placeY <= 9 && okGround, purpose: 'place', color: '#ffffff' };
+  }
+
+  return { x: fx, y: 1, z: fz, ok: false, purpose: 'none', color: '#ffffff' };
+}
+
+function buildStaticWorld() {
+  const cells = [];
+  const solidKeys = new Set();
+  const occKeys = new Set();
+  const groundTop = new Map();
+
+  const r0 = -36, r1 = 36;
+  for (let x = r0; x <= r1; x++) {
+    for (let z = r0; z <= r1; z++) {
+      const inLake = x >= LAKE.x0 && x <= LAKE.x1 && z >= LAKE.z0 && z <= LAKE.z1;
+      const onRoad = (Math.abs(x) <= 1 || Math.abs(z) <= 1) && !(x === 0 && z >= 6 && z <= 14);
+      let top = onRoad ? C.road : inLake ? C.water : C.grass;
+      cells.push({ x, y: -2, z, c: C.stone });
+      cells.push({ x, y: -1, z, c: C.dirt });
+      cells.push({ x, y: 0, z, c: top });
+      groundTop.set(`${x},${z}`, onRoad ? 'road' : inLake ? 'water' : 'grass');
+    }
+  }
+
+  BUILDINGS.forEach((b) => {
+    const x0 = Math.round(b.p[0] - b.w / 2);
+    const x1 = x0 + b.w - 1;
+    const z0 = Math.round(b.p[1] - b.d / 2);
+    const z1 = z0 + b.d - 1;
+    const cx = Math.round((x0 + x1) / 2);
+    for (let y = 1; y <= b.h; y++) {
+      for (let x = x0; x <= x1; x++) {
+        for (let z = z0; z <= z1; z++) {
+          if (x !== x0 && x !== x1 && z !== z0 && z !== z1) continue;
+          const isFront = z === z1;
+          if (isFront && x === cx && y <= 2) continue;
+          if (b.w >= 5 && isFront && (x === cx - 1 || x === cx + 1) && (y === 2 || (y === 3 && b.h >= 3))) {
+            cells.push({ x, y, z, c: C.glass });
+            continue;
+          }
+          cells.push({ x, y, z, c: b.wall });
+          solidKeys.add(toKey(x, y, z));
+          occKeys.add(toKey(x, y, z));
+        }
+      }
+    }
+    for (let x = x0; x <= x1; x++) {
+      for (let z = z0; z <= z1; z++) {
+        cells.push({ x, y: b.h + 1, z, c: b.roof });
+        occKeys.add(toKey(x, b.h + 1, z));
+      }
+    }
+    if (b.h >= 3) {
+      for (let x = x0 + 1; x <= x1 - 1; x++) {
+        for (let z = z0 + 1; z <= z1 - 1; z++) {
+          const edge = x === x0 + 1 || x === x1 - 1 || z === z0 + 1 || z === z1 - 1;
+          if (edge) {
+            cells.push({ x, y: b.h + 2, z, c: b.roof });
+            occKeys.add(toKey(x, b.h + 2, z));
+          }
+        }
+      }
+    }
+  });
+
+  const pushTree = (px, pz, big) => {
+    const trunkH = big ? 3 : 2;
+    for (let y = 1; y <= trunkH; y++) {
+      cells.push({ x: px, y, z: pz, c: C.wood });
+      occKeys.add(toKey(px, y, pz));
+    }
+    const top = trunkH;
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        if (Math.abs(dx) === 1 && Math.abs(dz) === 1) continue;
+        cells.push({ x: px + dx, y: top + 1, z: pz + dz, c: C.leaf });
+        occKeys.add(toKey(px + dx, top + 1, pz + dz));
+      }
+    }
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        if (dx === 0 && dz === 0) continue;
+        if (Math.abs(dx) === 1 && Math.abs(dz) === 1) continue;
+        cells.push({ x: px + dx, y: top + 2, z: pz + dz, c: dx === 0 || dz === 0 ? C.leaf : C.leafDark });
+        occKeys.add(toKey(px + dx, top + 2, pz + dz));
+      }
+    }
+  };
+
+  TREES.forEach((t) => pushTree(t[0], t[1], (Math.abs(t[0]) + Math.abs(t[1])) % 3 === 0));
+
+  MOUNTAINS.forEach((m) => {
+    for (let ry = 0; ry < m.h; ry++) {
+      const inset = Math.floor(ry * (m.r / m.h));
+      const size = m.r - inset;
+      const y = 1 + ry;
+      for (let dx = -size; dx <= size; dx++) {
+        for (let dz = -size; dz <= size; dz++) {
+          if (dx === -size || dx === size || dz === -size || dz === size) {
+            const isTop = y === m.h;
+            cells.push({ x: m.p[0] + dx, y, z: m.p[1] + dz, c: isTop ? C.grassDark : C.stone });
+            occKeys.add(toKey(m.p[0] + dx, y, m.p[1] + dz));
+          }
+        }
+      }
+    }
+  });
+
+  for (let x = -6; x <= 6; x += 2) {
+    cells.push({ x, y: 1, z: 8, c: C.fence });
+    occKeys.add(toKey(x, 1, 8));
+    cells.push({ x, y: 2, z: 8, c: C.fence });
+    occKeys.add(toKey(x, 2, 8));
+  }
+
+  return { cells, solidKeys, occKeys, groundTop };
+}
+
+const STATIC_WORLD = buildStaticWorld();
+
+function VoxelLayer({ cells, color, castShadow = true }) {
+  const ref = useRef(null);
+  const geometry = useMemo(() => new THREE.BoxGeometry(1, 1, 1), []);
+  const material = useMemo(
+    () =>
+      new THREE.MeshStandardMaterial({
+        color,
+        transparent: GLASSY.has(color),
+        opacity: GLASSY.has(color) ? 0.55 : 1,
+        depthWrite: !GLASSY.has(color),
+      }),
+    [color]
+  );
+
+  useEffect(() => {
+    const mesh = ref.current;
+    if (!mesh) return;
+    const dummy = new THREE.Object3D();
+    for (let i = 0; i < cells.length; i++) {
+      dummy.position.set(cells[i].x, cells[i].y, cells[i].z);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+    }
+    mesh.count = cells.length;
+    mesh.instanceMatrix.needsUpdate = true;
+  }, [cells]);
+
+  if (!cells.length) return null;
+  return (
+    <instancedMesh
+      ref={ref}
+      args={[geometry, material, INSTANCE_CAP]}
+      castShadow={castShadow}
+      receiveShadow
+      frustumCulled={false}
+      renderOrder={GLASSY.has(color) ? 1 : 0}
+    />
+  );
+}
+
+function Voxels({ cells, opaqueCast = true }) {
+  const layers = useMemo(() => {
+    const byColor = {};
+    cells.forEach((c) => {
+      const arr = byColor[c.c] || (byColor[c.c] = []);
+      arr.push(c);
+    });
+    return Object.entries(byColor).map(([c, list]) => ({ c, list }));
+  }, [cells]);
+
+  return layers.map((l) => <VoxelLayer key={l.c} cells={l.list} color={l.c} castShadow={opaqueCast && !GLASSY.has(l.c)} />);
+}
+
+function CropLayer({ crops, now }) {
+  return crops.map((cr) => {
+    const def = CROPS.find((c) => c.id === cr.cropId);
+    const timeMs = (def?.time || 60) * 1000;
+    const elapsed = Math.max(0, now - cr.plantedAt);
+    const progress = Math.min(1, elapsed / timeMs);
+    const grown = progress >= 1;
+    const color = CROP_COLORS[cr.cropId] || '#C5F0A0';
+    const scale = 0.32 + 0.3 * progress;
+    return (
+      <group key={`${cr.x}_${cr.y}_${cr.z}`} position={[cr.x, cr.y, cr.z]}>
+        <mesh position={[0, 0.5 * scale, 0]} castShadow>
+          <boxGeometry args={[scale, scale, scale]} />
+          <meshStandardMaterial color={grown ? color : '#9CCB7A'} />
+        </mesh>
+        {grown && (
+          <mesh position={[0, 0.5 * scale + 0.26, 0]} castShadow>
+            <boxGeometry args={[0.3, 0.3, 0.3]} />
+            <meshStandardMaterial color={C.leaf} />
+          </mesh>
+        )}
+      </group>
+    );
+  });
+}
+
+function Ghost() {
+  const group = useRef(null);
+  const geometry = useMemo(() => new THREE.BoxGeometry(1.01, 1.01, 1.01), []);
+  const edges = useMemo(() => new THREE.EdgesGeometry(geometry), [geometry]);
+  const material = useMemo(
+    () => new THREE.LineBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.9 }),
+    []
+  );
+
+  useFrame(() => {
+    if (!group.current) return;
+    const g = worldShared.ghost;
+    if (g && g.visible && g.ok) {
+      group.current.visible = true;
+      group.current.position.set(g.x, g.y, g.z);
+      material.color.set(g.color);
+    } else {
+      group.current.visible = false;
+    }
+  });
+
+  return (
+    <group ref={group} visible={false}>
+      <lineSegments geometry={edges} material={material} />
+    </group>
+  );
+}
+
+function Lighting() {
+  return (
+    <>
+      <ambientLight intensity={0.5} />
+      <directionalLight
+        position={[30, 40, 20]}
+        intensity={1.2}
+        castShadow
+        shadow-mapSize-width={2048}
+        shadow-mapSize-height={2048}
+        shadow-camera-far={100}
+        shadow-camera-left={-55}
+        shadow-camera-right={55}
+        shadow-camera-top={55}
+        shadow-camera-bottom={-55}
+      />
+      <hemisphereLight args={['#87CEEB', '#5DA65F', 0.4]} />
+    </>
+  );
+}
+
 function ThirdPersonCamera({ target }) {
   const { camera } = useThree();
-  const offset = useRef(new THREE.Vector3(0, 5, 8));
+  const offset = useRef(new THREE.Vector3(0, 4.6, 6.8));
   const currentPos = useRef(new THREE.Vector3());
   const currentLookAt = useRef(new THREE.Vector3());
 
   useFrame((_, delta) => {
-    if (!target.current) return;
-    const playerPos = target.current;
+    const playerPos = target?.current;
+    if (!playerPos) return;
     const desiredPos = new THREE.Vector3(
       playerPos.x + offset.current.x,
       playerPos.y + offset.current.y,
@@ -51,388 +445,618 @@ function ThirdPersonCamera({ target }) {
   return null;
 }
 
-// ─── PLAYER ──────────────────────────────────────────────────────
-function Player({ positionRef }) {
+function VoxelPlayer({
+  positionRef,
+  initialPosition = [0, FEET_Y, 8],
+  seedColor,
+  solidAt,
+}) {
   const meshRef = useRef();
   const velocity = useRef(new THREE.Vector3());
   const isGrounded = useRef(true);
   const [, getKeys] = useKeyboardControls();
+  const bodyColor = useMemo(() => {
+    const palette = ['#4A90D9', '#E74C3C', '#27AE60', '#F39C12', '#9B59B6', '#00BCD4'];
+    let h = 0;
+    const s = seedColor || '';
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    return palette[h % palette.length];
+  }, [seedColor]);
 
   useFrame((state, delta) => {
     if (!meshRef.current) return;
     const keys = getKeys();
     const direction = new THREE.Vector3();
-
     if (keys.forward) direction.z -= 1;
     if (keys.backward) direction.z += 1;
     if (keys.left) direction.x -= 1;
     if (keys.right) direction.x += 1;
-    direction.normalize();
-
-    // Mobile touch input
-    const t = touchInput;
-    if (t.move && (t.move.x !== 0 || t.move.y !== 0)) {
-      direction.x += t.move.x;
-      direction.z -= t.move.y;
-      direction.normalize();
+    const t = touchInput.move;
+    if (t && (t.x !== 0 || t.y !== 0)) {
+      direction.x += t.x;
+      direction.z -= t.y;
     }
+    direction.normalize();
+    const speed = (keys.run || touchInput.run) ? RUN_SPEED : WALK_SPEED;
 
-    const speed = (keys.run || t.run) ? RUN_SPEED : WALK_SPEED;
-
-    // Face direction of movement
     if (direction.length() > 0) {
       const angle = Math.atan2(direction.x, direction.z);
       meshRef.current.rotation.y = angle;
+      worldShared.rot = angle;
     }
 
-    // Apply horizontal movement
     velocity.current.x = direction.x * speed;
     velocity.current.z = direction.z * speed;
-
-    // Gravity
     velocity.current.y += GRAVITY * delta;
 
-    // Jump
-    if ((keys.jump || t.jump) && isGrounded.current) {
+    if ((keys.jump || touchInput.jump) && isGrounded.current) {
       velocity.current.y = JUMP_FORCE;
       isGrounded.current = false;
     }
 
-    // Update position
-    meshRef.current.position.x += velocity.current.x * delta;
-    meshRef.current.position.z += velocity.current.z * delta;
-    meshRef.current.position.y += velocity.current.y * delta;
+    const pos = meshRef.current.position;
+    const tryX = pos.x + velocity.current.x * delta;
+    const tryZ = pos.z + velocity.current.z * delta;
 
-    // Ground collision
-    if (meshRef.current.position.y <= PLAYER_HEIGHT / 2) {
-      meshRef.current.position.y = PLAYER_HEIGHT / 2;
+    if (!solidAt || !solidAt(tryX, pos.z)) pos.x = tryX;
+    else velocity.current.x = 0;
+    if (!solidAt || !solidAt(pos.x, tryZ)) pos.z = tryZ;
+    else velocity.current.z = 0;
+
+    pos.y += velocity.current.y * delta;
+    if (pos.y <= FEET_Y) {
+      pos.y = FEET_Y;
       velocity.current.y = 0;
       isGrounded.current = true;
     }
 
-    // World bounds
-    meshRef.current.position.x = THREE.MathUtils.clamp(meshRef.current.position.x, -45, 45);
-    meshRef.current.position.z = THREE.MathUtils.clamp(meshRef.current.position.z, -45, 45);
+    pos.x = THREE.MathUtils.clamp(pos.x, -WORLD_BOUNDS, WORLD_BOUNDS);
+    pos.z = THREE.MathUtils.clamp(pos.z, -WORLD_BOUNDS, WORLD_BOUNDS);
 
-    // Update position ref for camera
-    if (positionRef) {
-      positionRef.current = meshRef.current.position;
-    }
+    if (positionRef) positionRef.current = pos;
   });
 
   return (
-    <group ref={meshRef} position={[0, PLAYER_HEIGHT / 2, 0]}>
-      {/* Body */}
-      <mesh position={[0, 0.2, 0]} castShadow>
-        <capsuleGeometry args={[0.3, 0.6, 8, 16]} />
-        <meshStandardMaterial color="#4A90D9" />
+    <group ref={meshRef} position={initialPosition}>
+      <mesh position={[0, -0.25, 0]} castShadow>
+        <boxGeometry args={[0.32, 0.5, 0.32]} />
+        <meshStandardMaterial color="#2E3A4B" />
       </mesh>
-      {/* Head */}
-      <mesh position={[0, 0.85, 0]} castShadow>
-        <sphereGeometry args={[0.25, 16, 16]} />
+      <mesh position={[0, 0.15, 0]} castShadow>
+        <boxGeometry args={[0.58, 0.62, 0.34]} />
+        <meshStandardMaterial color={bodyColor} />
+      </mesh>
+      <mesh position={[0, 0.58, 0]} castShadow>
+        <boxGeometry args={[0.52, 0.5, 0.42]} />
         <meshStandardMaterial color="#FFD5B4" />
       </mesh>
-      {/* Eyes */}
-      <mesh position={[-0.08, 0.88, 0.2]}>
-        <sphereGeometry args={[0.04, 8, 8]} />
-        <meshStandardMaterial color="#333" />
+      <mesh position={[-0.11, 0.66, 0.22]}>
+        <boxGeometry args={[0.08, 0.1, 0.02]} />
+        <meshStandardMaterial color="#2B2B2B" />
       </mesh>
-      <mesh position={[0.08, 0.88, 0.2]}>
-        <sphereGeometry args={[0.04, 8, 8]} />
-        <meshStandardMaterial color="#333" />
-      </mesh>
-    </group>
-  );
-}
-
-// ─── GROUND ──────────────────────────────────────────────────────
-function Ground() {
-  return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
-      <planeGeometry args={[100, 100, 50, 50]} />
-      <meshStandardMaterial color="#5DA65F" />
-    </mesh>
-  );
-}
-
-// ─── ROAD ────────────────────────────────────────────────────────
-function Road({ points, width = 2 }) {
-  const shape = React.useMemo(() => {
-    const s = new THREE.Shape();
-    s.moveTo(-width / 2, 0);
-    s.lineTo(width / 2, 0);
-    return s;
-  }, [width]);
-
-  const curve = React.useMemo(() => {
-    const pts = points.map((p) => new THREE.Vector3(p[0], 0.01, p[1]));
-    return new THREE.CatmullRomCurve3(pts);
-  }, [points]);
-
-  const tubeGeo = React.useMemo(() => {
-    return new THREE.TubeGeometry(curve, 64, width / 2, 4, false);
-  }, [curve, width]);
-
-  return (
-    <mesh geometry={tubeGeo} position={[0, 0.01, 0]} rotation={[0, 0, 0]} receiveShadow>
-      <meshStandardMaterial color="#C4A265" />
-    </mesh>
-  );
-}
-
-// ─── BUILDING ────────────────────────────────────────────────────
-function Building({ position, size, color, label, roofColor }) {
-  const [w, h, d] = size;
-  return (
-    <group position={position}>
-      {/* Base */}
-      <mesh position={[0, h / 2, 0]} castShadow receiveShadow>
-        <boxGeometry args={[w, h, d]} />
-        <meshStandardMaterial color={color} />
-      </mesh>
-      {/* Roof */}
-      <mesh position={[0, h + 0.3, 0]} castShadow>
-        <boxGeometry args={[w + 0.3, 0.5, d + 0.3]} />
-        <meshStandardMaterial color={roofColor || '#8B4513'} />
-      </mesh>
-      {/* Door */}
-      <mesh position={[0, 0.5, d / 2 + 0.01]}>
-        <planeGeometry args={[0.8, 1]} />
-        <meshStandardMaterial color="#6B4226" />
-      </mesh>
-      {/* Windows */}
-      <mesh position={[-w / 4, h * 0.6, d / 2 + 0.01]}>
-        <planeGeometry args={[0.5, 0.5]} />
-        <meshStandardMaterial color="#87CEEB" />
-      </mesh>
-      <mesh position={[w / 4, h * 0.6, d / 2 + 0.01]}>
-        <planeGeometry args={[0.5, 0.5]} />
-        <meshStandardMaterial color="#87CEEB" />
+      <mesh position={[0.11, 0.66, 0.22]}>
+        <boxGeometry args={[0.08, 0.1, 0.02]} />
+        <meshStandardMaterial color="#2B2B2B" />
       </mesh>
     </group>
   );
 }
 
-// ─── TREE ────────────────────────────────────────────────────────
-function Tree({ position, scale = 1 }) {
-  return (
-    <group position={position} scale={scale}>
-      <mesh position={[0, 1, 0]} castShadow>
-        <cylinderGeometry args={[0.15, 0.2, 2, 8]} />
-        <meshStandardMaterial color="#6B4226" />
-      </mesh>
-      <mesh position={[0, 2.5, 0]} castShadow>
-        <sphereGeometry args={[1, 8, 8]} />
-        <meshStandardMaterial color="#3D8B37" />
-      </mesh>
-    </group>
-  );
-}
-
-// ─── WATER ───────────────────────────────────────────────────────
-function Water({ position, size }) {
+function VoxelNPC({ position, color }) {
   const ref = useRef();
   useFrame((state) => {
     if (ref.current) {
-      ref.current.position.y = position[1] + Math.sin(state.clock.elapsedTime * 0.5) * 0.05;
+      ref.current.position.y = FEET_Y + Math.sin(state.clock.elapsedTime * 2 + position[0]) * 0.06;
     }
   });
   return (
-    <mesh ref={ref} position={position} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-      <planeGeometry args={size} />
-      <meshStandardMaterial color="#4FC3F7" transparent opacity={0.7} />
-    </mesh>
-  );
-}
-
-// ─── NPC ─────────────────────────────────────────────────────────
-function NPC({ position, color, label, emoji }) {
-  const ref = useRef();
-  useFrame((state) => {
-    if (ref.current) {
-      ref.current.position.y = 0.8 + Math.sin(state.clock.elapsedTime * 2 + position[0]) * 0.05;
-    }
-  });
-  return (
-    <group ref={ref} position={position}>
-      <mesh castShadow>
-        <capsuleGeometry args={[0.25, 0.5, 8, 16]} />
+    <group ref={ref} position={[position[0], FEET_Y, position[1]]}>
+      <mesh position={[0, 0.15, 0]} castShadow>
+        <boxGeometry args={[0.5, 0.6, 0.32]} />
         <meshStandardMaterial color={color} />
       </mesh>
-      <mesh position={[0, 0.65, 0]} castShadow>
-        <sphereGeometry args={[0.2, 16, 16]} />
+      <mesh position={[0, 0.55, 0]} castShadow>
+        <boxGeometry args={[0.45, 0.42, 0.38]} />
         <meshStandardMaterial color="#FFD5B4" />
+      </mesh>
+      <mesh position={[-0.09, 0.62, 0.2]}>
+        <boxGeometry args={[0.07, 0.09, 0.02]} />
+        <meshStandardMaterial color="#2B2B2B" />
+      </mesh>
+      <mesh position={[0.09, 0.62, 0.2]}>
+        <boxGeometry args={[0.07, 0.09, 0.02]} />
+        <meshStandardMaterial color="#2B2B2B" />
       </mesh>
     </group>
   );
 }
 
-// ─── COLLECTIBLE ─────────────────────────────────────────────────
-function Collectible({ position, color, onCollect }) {
-  const ref = useRef();
-  const [visible, setVisible] = useState(true);
-  useFrame((state) => {
-    if (ref.current && visible) {
-      ref.current.rotation.y = state.clock.elapsedTime * 2;
-      ref.current.position.y = position[1] + Math.sin(state.clock.elapsedTime * 3) * 0.15;
-    }
+function Collectibles({ items, playerRef, onCollect }) {
+  const [taken, setTaken] = useState({});
+
+  useFrame(() => {
+    const p = playerRef.current;
+    if (!p) return;
+    items.forEach((it) => {
+      if (taken[it.id]) return;
+      const dx = p.x - it.p[0];
+      const dz = p.z - it.p[2];
+      if (dx * dx + dz * dz < 2.4) {
+        setTaken((prev) => (prev[it.id] ? prev : { ...prev, [it.id]: true }));
+        onCollect(it.type);
+      }
+    });
   });
-  if (!visible) return null;
-  return (
-    <mesh ref={ref} position={position} onClick={() => { setVisible(false); onCollect?.(); }}>
-      <dodecahedronGeometry args={[0.3, 0]} />
-      <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.3} />
-    </mesh>
-  );
+
+  return items
+    .filter((it) => !taken[it.id])
+    .map((it) => (
+      <group key={it.id} position={it.p}>
+        <mesh position={[0, 0.5, 0]} castShadow>
+          <boxGeometry args={[0.5, 0.5, 0.5]} />
+          <meshStandardMaterial color={it.c} emissive={it.c} emissiveIntensity={0.25} />
+        </mesh>
+        <mesh position={[0, 0.9, 0]}>
+          <boxGeometry args={[0.3, 0.3, 0.3]} />
+          <meshStandardMaterial color={it.c} emissive={it.c} emissiveIntensity={0.4} />
+        </mesh>
+      </group>
+    ));
 }
 
-// ─── MOUNTAIN ────────────────────────────────────────────────────
-function Mountain({ position, height = 10, radius = 8 }) {
-  return (
-    <mesh position={[position[0], height / 2, position[2]]} castShadow>
-      <coneGeometry args={[radius, height, 8]} />
-      <meshStandardMaterial color="#6B8E6B" />
-    </mesh>
-  );
-}
+function GameScene({ playerPosRef, placed, crops, mode, seedColor, onCollect }) {
+  const [now, setNow] = useState(Date.now());
 
-// ─── LIGHTING ────────────────────────────────────────────────────
-function Lighting() {
-  return (
-    <>
-      <ambientLight intensity={0.5} />
-      <directionalLight
-        position={[30, 40, 20]}
-        intensity={1.2}
-        castShadow
-        shadow-mapSize-width={2048}
-        shadow-mapSize-height={2048}
-        shadow-camera-far={100}
-        shadow-camera-left={-50}
-        shadow-camera-right={50}
-        shadow-camera-top={50}
-        shadow-camera-bottom={-50}
-      />
-      <hemisphereLight args={['#87CEEB', '#5DA65F', 0.4]} />
-    </>
-  );
-}
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 800);
+    return () => clearInterval(id);
+  }, []);
 
-// ─── LOADING ─────────────────────────────────────────────────────
-function LoadingScreen() {
-  return (
-    <div className="fixed inset-0 z-[100] bg-gradient-to-b from-blue-400 to-green-400 flex flex-col items-center justify-center">
-      <div className="text-6xl mb-4">🏫</div>
-      <h1 className="text-2xl font-display font-bold text-white mb-2">IARA EDU</h1>
-      <p className="text-white/80 text-sm mb-6">Carregando o mundo...</p>
-      <div className="w-48 h-2 bg-white/30 rounded-full overflow-hidden">
-        <div className="h-full bg-white rounded-full animate-pulse" style={{ width: '60%' }} />
-      </div>
-    </div>
-  );
-}
+  const occSet = useMemo(() => makeOccSet(placed, crops), [placed, crops]);
 
-// ─── GAME WORLD SCENE ────────────────────────────────────────────
-function GameScene({ onCollect }) {
-  const playerPosRef = useRef(new THREE.Vector3());
+  const collisionSet = useMemo(() => {
+    const set = new Set(STATIC_WORLD.solidKeys);
+    Object.keys(placed).forEach((k) => set.add(k));
+    return set;
+  }, [placed]);
+
+  const solidAt = useMemo(
+    () => (px, pz) => {
+      for (let dx = -0.35; dx <= 0.35; dx += 0.7) {
+        for (let dz = -0.35; dz <= 0.35; dz += 0.7) {
+          const cx = Math.floor(px + dx);
+          const cz = Math.floor(pz + dz);
+          for (let y = 1; y <= 2; y++) {
+            if (collisionSet.has(toKey(cx, y, cz))) return true;
+          }
+        }
+      }
+      return false;
+    },
+    [collisionSet]
+  );
+
+  const mergedCells = useMemo(() => {
+    const out = [];
+    const placedList = Object.values(placed);
+    for (let i = 0; i < placedList.length; i++) {
+      const p = placedList[i];
+      const def = BLOCKS.find((b) => b.id === p.id);
+      out.push({ x: p.x, y: p.y, z: p.z, c: def ? def.c : C.dirt });
+    }
+    return STATIC_WORLD.cells.concat(out);
+  }, [placed]);
+
+  useFrame(() => {
+    const p = playerPosRef.current;
+    if (!p) return;
+    const ghost = computeFront({
+      px: p.x,
+      pz: p.z,
+      rot: worldShared.rot || 0,
+      placed,
+      crops,
+      mode,
+      occSet,
+    });
+    worldShared.front = ghost;
+    worldShared.ghost = ghost;
+  });
 
   return (
     <>
       <Lighting />
       <ThirdPersonCamera target={playerPosRef} />
       <KeyboardControls map={keyMap}>
-        <Player positionRef={playerPosRef} />
+        <VoxelPlayer
+          positionRef={playerPosRef}
+          seedColor={seedColor}
+          solidAt={solidAt}
+        />
       </KeyboardControls>
 
-      {/* Ground */}
-      <Ground />
+      <Voxels cells={mergedCells} />
 
-      {/* Roads */}
-      <Road points={[[-40, 0], [-10, 0], [0, 0], [10, 0], [40, 0]]} width={2.5} />
-      <Road points={[[0, -40], [0, -10], [0, 0], [0, 10], [0, 40]]} width={2.5} />
+      <CropLayer crops={Object.values(crops)} now={now} />
 
-      {/* Buildings */}
-      <Building position={[-15, 0, -15]} size={[5, 3, 4]} color="#8B5E3C" roofColor="#A0522D" label="Casa" />
-      <Building position={[0, 0, -12]} size={[6, 4, 5]} color="#4A90D9" roofColor="#3A7BC8" label="Escola" />
-      <Building position={[12, 0, -10]} size={[5, 3.5, 4]} color="#8B4513" roofColor="#A0522D" label="Biblioteca" />
-      <Building position={[20, 0, -5]} size={[5, 4, 5]} color="#2ECC71" roofColor="#27AE60" label="Laboratório" />
-      <Building position={[-12, 0, 10]} size={[7, 2.5, 5]} color="#DAA520" roofColor="#B8860B" label="Fazenda" />
-      <Building position={[8, 0, 12]} size={[5, 3, 4]} color="#E67E22" roofColor="#D35400" label="Mercado" />
-      <Building position={[18, 0, 10]} size={[4, 3, 4]} color="#F39C12" roofColor="#E67E22" label="Praça" />
-      <Building position={[-20, 0, -5]} size={[5, 3.5, 4]} color="#CD853F" roofColor="#8B6914" label="Museu" />
-      <Building position={[25, 0, -15]} size={[5, 4, 5]} color="#9B59B6" roofColor="#8E44AD" label="Centro Tech" />
-
-      {/* Trees */}
-      {[[-30, 0, -30], [-25, 0, 20], [30, 0, -25], [35, 0, 25], [-35, 0, 5], [0, 0, 30], [-20, 0, 25], [25, 0, -30], [-8, 0, 20], [15, 0, 25]].map((pos, i) => (
-        <Tree key={`tree-${i}`} position={pos} scale={0.8 + Math.random() * 0.4} />
+      {NPCS.map((n) => (
+        <VoxelNPC key={n.label} position={[n.p[0], n.p[1]]} color={n.c} />
       ))}
 
-      {/* Mountains */}
-      <Mountain position={[-35, 0, -35]} height={12} radius={8} />
-      <Mountain position={[35, 0, -35]} height={15} radius={10} />
-      <Mountain position={[35, 0, 35]} height={10} radius={7} />
+      <Collectibles items={COLLECTIBLES} playerRef={playerPosRef} onCollect={onCollect} />
 
-      {/* Water */}
-      <Water position={[30, 0.05, 20]} size={[8, 6]} />
-
-      {/* NPCs */}
-      <NPC position={[0, 0.8, -9]} color="#7C3AED" label="IARA" />
-      <NPC position={[2, 0.8, -9]} color="#4A90D9" label="Professor" />
-      <NPC position={[-10, 0.8, 12]} color="#8B6914" label="Agricultor" />
-      <NPC position={[15, 0.8, 12]} color="#E67E22" label="Mercador" />
-
-      {/* Collectibles */}
-      <Collectible position={[-5, 1, -5]} color="#FFD700" onCollect={() => onCollect?.('coin')} />
-      <Collectible position={[8, 1, -3]} color="#4FC3F7" onCollect={() => onCollect?.('gem')} />
-      <Collectible position={[-8, 1, 8]} color="#FF6B6B" onCollect={() => onCollect?.('heart')} />
-      <Collectible position={[15, 1, -8]} color="#4CAF50" onCollect={() => onCollect?.('seed')} />
-      <Collectible position={[-15, 1, -8]} color="#9B59B6" onCollect={() => onCollect?.('star')} />
+      <Ghost />
     </>
   );
 }
 
-// ─── MAIN EXPORT ─────────────────────────────────────────────────
-const GameWorld = ({ onClose }) => {
+function VoxelHUD({
+  page,
+  setPage,
+  blockOffset,
+  setBlockOffset,
+  slot,
+  setSlot,
+  blocks,
+  seeds,
+  farm,
+  onPrimary,
+  onRemove,
+}) {
+  const visibleBlocks = [];
+  for (let i = 0; i < 9; i++) {
+    const def = BLOCKS[(blockOffset + i) % BLOCKS.length];
+    visibleBlocks.push(def);
+  }
+
+  const slotCount = (def) => (def ? (blocks[def.id] || 0) : 0);
+
+  const seedList = seeds.filter((s) => farm && (farm.level || 1) >= (s.level || 1));
+  const seedSlots = [];
+  for (let i = 0; i < 9; i++) seedSlots.push(seedList[i] || null);
+  const seedsCount = (id) => (farm?.inventories?.sementes?.[id] || 0);
+
+  const activeDef = page === 0 ? visibleBlocks[slot] : seedSlots[slot];
+  const activeColor = page === 0 ? activeDef?.c : C.leaf;
+  const activeName = page === 0 ? activeDef?.name : activeDef?.name;
+
+  return (
+    <div className="absolute bottom-0 left-0 right-0 z-[95] pointer-events-none flex flex-col items-center pb-3 gap-2">
+      <div className="pointer-events-auto bg-black/55 backdrop-blur-sm rounded-xl px-3 py-1.5 text-white text-xs flex items-center gap-2">
+        <span
+          className="inline-block w-3 h-3 rounded-sm border border-white/40"
+          style={{ background: activeColor || '#888' }}
+        />
+        <span className="font-bold">{activeName || '—'}</span>
+        <span className="text-white/50">
+          {page === 0 ? `F colocar · R remover · E colher` : `F plantar · E colher`}
+        </span>
+      </div>
+
+      <div className="pointer-events-auto flex items-center gap-2 bg-black/60 backdrop-blur-sm rounded-2xl p-2">
+        <div className="flex flex-col">
+          <button
+            onClick={() => { setPage(0); setSlot(0); }}
+            className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-colors ${page === 0 ? 'bg-green-500 text-white' : 'bg-white/10 text-white/70 hover:bg-white/20'}`}
+          >
+            🧱 Construir
+          </button>
+          <button
+            onClick={() => { setPage(1); setSlot(0); }}
+            className={`mt-1 px-2 py-1 rounded-lg text-[11px] font-bold transition-colors ${page === 1 ? 'bg-green-500 text-white' : 'bg-white/10 text-white/70 hover:bg-white/20'}`}
+          >
+            🌱 Plantar
+          </button>
+        </div>
+
+        {page === 0 && (
+          <button
+            onClick={() => setBlockOffset((o) => (o + 3) % BLOCKS.length)}
+            className="px-2 py-1 rounded-lg text-[11px] font-bold bg-white/10 text-white/70 hover:bg-white/20"
+            title="Mais blocos"
+          >
+            « »
+          </button>
+        )}
+
+        <div className="flex gap-1">
+          {(page === 0 ? visibleBlocks : seedSlots).map((def, i) => {
+            const isBlock = page === 0;
+            const count = isBlock ? slotCount(def) : def ? seedsCount(def.id) : 0;
+            return (
+              <button
+                key={`${page}-${i}`}
+                onClick={() => setSlot(i)}
+                className={`relative w-11 h-12 rounded-lg border-2 flex flex-col items-center justify-center transition-colors ${
+                  slot === i ? 'border-white bg-white/20' : 'border-white/20 bg-black/40 hover:bg-white/10'
+                } ${!def ? 'opacity-40' : ''}`}
+              >
+                {def ? (
+                  <>
+                    <span
+                      className="w-5 h-5 rounded-sm border border-white/30"
+                      style={{ background: isBlock ? def.c : CROP_COLORS[def.id] }}
+                    />
+                    <span className="text-[9px] text-white/80 mt-0.5 truncate max-w-full px-0.5">
+                      {isBlock ? def.name : def.name}
+                    </span>
+                    <span className="absolute top-0.5 right-1 text-[9px] font-bold text-white/90">{count}</span>
+                  </>
+                ) : (
+                  <span className="text-white/30 text-sm">·</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <button
+            onClick={onPrimary}
+            className="px-2 py-2 rounded-lg text-[11px] font-bold bg-green-500 text-white hover:bg-green-400 active:scale-95"
+          >
+            {page === 0 ? '⬜' : '🌱'}
+          </button>
+          <button
+            onClick={onRemove}
+            className="px-2 py-2 rounded-lg text-[11px] font-bold bg-red-500/80 text-white hover:bg-red-500 active:scale-95"
+          >
+            🗑
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const LoadingScreen = () => (
+  <div className="fixed inset-0 z-[100] bg-gradient-to-b from-blue-400 to-green-400 flex flex-col items-center justify-center">
+    <div className="text-6xl mb-4">🧱</div>
+    <h1 className="text-2xl font-display font-bold text-white mb-2">IARA EDU</h1>
+    <p className="text-white/80 text-sm mb-6">Gerando mundo em blocos...</p>
+    <div className="w-48 h-2 bg-white/30 rounded-full overflow-hidden">
+      <div className="h-full bg-white rounded-full animate-pulse" style={{ width: '60%' }} />
+    </div>
+  </div>
+);
+
+const GameWorld = ({ onClose, seedColor }) => {
   const { user } = useAuth();
   const userEmail = user?.email;
+  const storageKey = `iara_voxel_world_${userEmail || 'anon'}`;
+
   const [loaded, setLoaded] = useState(false);
   const [coins, setCoins] = useState(0);
   const [xp, setXp] = useState(0);
   const [notifications, setNotifications] = useState([]);
+  const [farm, setFarm] = useState(null);
+
+  const playerPosRef = useRef(new THREE.Vector3(0, FEET_Y, 8));
+
+  const [page, setPage] = useState(0);
+  const [blockOffset, setBlockOffset] = useState(0);
+  const [slot, setSlot] = useState(0);
+
+  const initialState = useMemo(() => {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        return {
+          placed: parsed.placed || {},
+          crops: parsed.crops || {},
+          blocks: parsed.blocks || START_KIT,
+        };
+      }
+    } catch (e) {}
+    return { placed: {}, crops: {}, blocks: START_KIT };
+  }, [storageKey]);
+
+  const [placed, setPlaced] = useState(initialState.placed);
+  const [crops, setCrops] = useState(initialState.crops);
+  const [blocks, setBlocks] = useState(initialState.blocks);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify({ placed, crops, blocks }));
+    } catch (e) {}
+  }, [placed, crops, blocks, storageKey]);
 
   useEffect(() => {
     const t = setTimeout(() => setLoaded(true), 1500);
     return () => clearTimeout(t);
   }, []);
 
+  useEffect(() => {
+    if (!user?.email) return;
+    let f = getOrCreateFarm(user);
+    if (f && f.mission_date !== new Date().toISOString().slice(0, 10)) {
+      f = advanceFarmDay(f);
+    }
+    if (f) f = getFarmFor(user.email);
+    setFarm(f);
+
+    setCrops((prev) => {
+      const next = {};
+      const valid = new Set((f?.crops || []).map((c) => c.id));
+      Object.keys(prev).forEach((k) => {
+        if (valid.has(prev[k].farmCropId)) next[k] = prev[k];
+      });
+      return next;
+    });
+  }, [user]);
+
+  useEffect(() => {
+    const handler = (e) => {
+      const code = e.code;
+      if (code === 'KeyF') { e.preventDefault(); handlePrimaryRef.current(); return; }
+      if (code === 'KeyR') { e.preventDefault(); handleRemoveRef.current(); return; }
+      if (code === 'KeyE') { e.preventDefault(); handleHarvestRef.current(); return; }
+      if (code === 'Tab' || code === 'KeyQ') {
+        e.preventDefault();
+        setPage((p) => (p === 0 ? 1 : 0));
+        setSlot(0);
+        return;
+      }
+      if (/^Digit[1-9]$/.test(code)) {
+        setSlot(Number(code.slice(5)) - 1);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  const pushToast = (text) => {
+    setNotifications((p) => [...p, { id: Date.now() + Math.random(), text }]);
+    setTimeout(() => setNotifications((p) => p.slice(1)), 2600);
+  };
+
+  const selectedBlock = () => BLOCKS[(blockOffset + slot) % BLOCKS.length];
+  const selectedSeed = () => {
+    const seedList = CROPS.filter((c) => (farm?.level || 1) >= (c.level || 1));
+    return seedList[slot] || seedList[0] || null;
+  };
+
   const handleCollect = (type) => {
-    const rewards = { coin: { xp: 10, coins: 1, label: '+10 XP, +1 🪙' }, gem: { xp: 25, coins: 3, label: '+25 XP, +3 💎' }, heart: { xp: 15, coins: 1, label: '+15 XP, +1 ❤️' }, seed: { xp: 20, coins: 2, label: '+20 XP, +2 🌱' }, star: { xp: 30, coins: 5, label: '+30 XP, +5 ⭐' } };
+    const rewards = {
+      coin: { xp: 10, coins: 1, label: '+10 XP, +1 🪙' },
+      gem: { xp: 25, coins: 3, label: '+25 XP, +3 💎' },
+      heart: { xp: 15, coins: 1, label: '+15 XP, +1 ❤️' },
+      seed: { xp: 20, coins: 2, label: '+20 XP, +2 🌱' },
+      star: { xp: 30, coins: 5, label: '+30 XP, +5 ⭐' },
+    };
     const r = rewards[type] || rewards.coin;
     setXp((p) => p + r.xp);
     setCoins((p) => p + r.coins);
-    setNotifications((p) => [...p, { id: Date.now(), text: r.label }]);
-    setTimeout(() => setNotifications((p) => p.slice(1)), 2500);
+    pushToast(`${r.label} +🧱`);
     if (userEmail) awardReward(userEmail, 'WORLD_COLLECT', { extraXp: r.xp, extraCoins: r.coins, item: type });
+
+    const extra = BLOCKS[Math.floor(Math.random() * BLOCKS.length)];
+    setBlocks((prev) => ({ ...prev, [extra.id]: (prev[extra.id] || 0) + 3 }));
   };
+
+  const frontNow = () => {
+    const p = playerPosRef.current;
+    return computeFront({
+      px: p.x,
+      pz: p.z,
+      rot: worldShared.rot || 0,
+      placed,
+      crops,
+      mode: page === 0 ? 'build' : 'plant',
+    });
+  };
+
+  const doPlace = () => {
+    const g = frontNow();
+    if (!g || g.purpose !== 'place' || !g.ok) { pushToast('Sem espaço aí. Ande para um local aberto.'); return; }
+    const def = selectedBlock();
+    if (!def) return;
+    const have = blocks[def.id] || 0;
+    if (have <= 0) { pushToast(`Sem ${def.name} no inventário. Colete itens!`); return; }
+    const key = toKey(g.x, g.y, g.z);
+    setPlaced((prev) => ({ ...prev, [key]: { x: g.x, y: g.y, z: g.z, id: def.id } }));
+    setBlocks((prev) => ({ ...prev, [def.id]: have - 1 }));
+  };
+
+  const doRemove = () => {
+    const g = frontNow();
+    if (!g || g.purpose !== 'break' || !g.ok) { pushToast('Não há bloco seu para remover aqui.'); return; }
+    const key = toKey(g.x, g.y, g.z);
+    const cell = placed[key];
+    if (!cell) return;
+    setPlaced((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+    setBlocks((prev) => ({ ...prev, [cell.id]: (prev[cell.id] || 0) + 1 }));
+    pushToast(`${BLOCKS.find((b) => b.id === cell.id)?.name || 'Bloco'} removido`);
+  };
+
+  const doPlant = () => {
+    const g = frontNow();
+    if (!g || g.purpose !== 'plant' || !g.ok) { pushToast('Plante em terra ou grama livre.'); return; }
+    const seedDef = selectedSeed();
+    if (!seedDef) { pushToast('Escolha uma semente.'); return; }
+    if (!farm) { pushToast('Entre para usar a fazenda.'); return; }
+    const res = plantCrop(farm, seedDef.id);
+    if (!res.ok) { pushToast(res.msg); return; }
+    setFarm(res.farm);
+    const newCrop = res.farm.crops[res.farm.crops.length - 1];
+    const key = toKey(g.x, g.y, g.z);
+    setCrops((prev) => ({
+      ...prev,
+      [key]: { x: g.x, y: g.y, z: g.z, cropId: seedDef.id, farmCropId: newCrop.id, plantedAt: newCrop.plantedAt || Date.now() },
+    }));
+  };
+
+  const doHarvest = async () => {
+    const g = frontNow();
+    const cropCell = g && g.purpose === 'harvest' ? crops[toKey(g.x, g.y, g.z)] : null;
+    if (!cropCell || !farm) return;
+    const def = CROPS.find((c) => c.id === cropCell.cropId);
+    if (!g.mature && !(Date.now() - cropCell.plantedAt >= (def?.time || 60) * 1000)) {
+      pushToast(`${def?.emoji || '🌱'} Ainda crescendo. Volte já já!`);
+      return;
+    }
+    const res = await harvestCrop(farm, cropCell.farmCropId);
+    if (!res.ok) { pushToast(res.msg); return; }
+    setFarm(res.farm);
+    const key = toKey(cropCell.x, cropCell.y, cropCell.z);
+    setCrops((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+    pushToast(res.msg);
+  };
+
+  const handlePrimary = () => {
+    if (!frontNow()) return;
+    if (page === 0) doPlace();
+    else doPlant();
+  };
+
+  const handlePrimaryRef = useRef(handlePrimary);
+  const handleRemoveRef = useRef(doRemove);
+  const handleHarvestRef = useRef(doHarvest);
+  useEffect(() => {
+    handlePrimaryRef.current = handlePrimary;
+    handleRemoveRef.current = doRemove;
+    handleHarvestRef.current = doHarvest;
+  });
+
+  const seeds = useMemo(
+    () => CROPS.map((c) => ({ ...c, count: farm?.inventories?.sementes?.[c.id] || 0 })),
+    [farm]
+  );
 
   if (!loaded) return <LoadingScreen />;
 
   return (
     <div className="fixed inset-0 z-[90] bg-black">
-      {/* Back button */}
-      <button onClick={onClose} className="absolute top-4 left-4 z-[95] bg-black/50 hover:bg-black/70 text-white px-4 py-2 rounded-xl font-bold text-sm backdrop-blur-sm transition-colors">
+      <button
+        onClick={onClose}
+        className="absolute top-4 left-4 z-[95] bg-black/50 hover:bg-black/70 text-white px-4 py-2 rounded-xl font-bold text-sm backdrop-blur-sm transition-colors"
+      >
         ← Sair do Mundo 3D
       </button>
 
-      {/* HUD */}
       <HUD xp={xp} coins={coins} notifications={notifications} />
 
-      {/* Desktop controls hint */}
-      <div className="hidden md:block absolute bottom-4 left-4 z-[95] bg-black/50 text-white/70 text-xs px-3 py-2 rounded-lg backdrop-blur-sm">
-        <p><kbd className="bg-white/20 px-1 rounded">WASD</kbd> Mover &nbsp; <kbd className="bg-white/20 px-1 rounded">SHIFT</kbd> Correr &nbsp; <kbd className="bg-white/20 px-1 rounded">SPACE</kbd> Pular</p>
+      <div className="hidden md:block absolute top-4 left-1/2 -translate-x-1/2 z-[95] bg-black/50 text-white/70 text-[11px] px-3 py-2 rounded-lg backdrop-blur-sm text-center">
+        <p>
+          <kbd className="bg-white/20 px-1 rounded">WASD</kbd> Mover · <kbd className="bg-white/20 px-1 rounded">SHIFT</kbd> Correr ·{' '}
+          <kbd className="bg-white/20 px-1 rounded">ESPAÇO</kbd> Pular
+        </p>
+        <p className="mt-1">
+          <kbd className="bg-white/20 px-1 rounded">F</kbd> Colocar/Plantar · <kbd className="bg-white/20 px-1 rounded">R</kbd> Remover ·{' '}
+          <kbd className="bg-white/20 px-1 rounded">E</kbd> Colher · <kbd className="bg-white/20 px-1 rounded">TAB</kbd> Pagina ·{' '}
+          <kbd className="bg-white/20 px-1 rounded">1-9</kbd> Selecionar
+        </p>
       </div>
 
-      {/* Mobile controls */}
       <div className="md:hidden fixed bottom-5 left-5 z-[95]">
         <VirtualJoystick
           onChange={(v) => {
@@ -441,20 +1065,37 @@ const GameWorld = ({ onClose }) => {
           }}
         />
       </div>
-      <div className="md:hidden fixed bottom-8 right-6 z-[95] flex flex-col gap-3 items-center">
+      <div className="md:hidden fixed bottom-32 right-5 z-[95] flex flex-col gap-2 items-center">
         <button
           onTouchStart={(e) => { e.preventDefault(); setTouchInput({ jump: true }); }}
           onTouchEnd={() => setTouchInput({ jump: false })}
           className="w-14 h-14 rounded-full bg-white/20 border-2 border-white/30 text-white text-xl font-bold backdrop-blur-sm active:bg-white/40"
-        >⤒</button>
+        >
+          ⤒
+        </button>
         <button
           onTouchStart={(e) => { e.preventDefault(); setTouchInput({ run: true }); }}
           onTouchEnd={() => setTouchInput({ run: false })}
           className="w-14 h-14 rounded-full bg-white/20 border-2 border-white/30 text-white text-xs font-bold backdrop-blur-sm active:bg-white/40"
-        >RUN</button>
+        >
+          RUN
+        </button>
       </div>
 
-      {/* 3D Canvas */}
+      <VoxelHUD
+        page={page}
+        setPage={setPage}
+        blockOffset={blockOffset}
+        setBlockOffset={setBlockOffset}
+        slot={slot}
+        setSlot={setSlot}
+        blocks={blocks}
+        seeds={seeds}
+        farm={farm}
+        onPrimary={handlePrimary}
+        onRemove={doRemove}
+      />
+
       <GameErrorBoundary>
         <Canvas
           shadows
@@ -463,8 +1104,15 @@ const GameWorld = ({ onClose }) => {
           onCreated={({ gl }) => { gl.setClearColor('#87CEEB'); gl.shadowMap.enabled = true; }}
           fallback={<div className="fixed inset-0 flex items-center justify-center text-white">Carregando 3D...</div>}
         >
-          <fog attach="fog" args={['#B0E0FF', 40, 80]} />
-          <GameScene onCollect={handleCollect} />
+          <fog attach="fog" args={['#B0E0FF', 45, 110]} />
+          <GameScene
+            playerPosRef={playerPosRef}
+            placed={placed}
+            crops={crops}
+            mode={page === 0 ? 'build' : 'plant'}
+            seedColor={seedColor || user?.email}
+            onCollect={handleCollect}
+          />
         </Canvas>
       </GameErrorBoundary>
     </div>
