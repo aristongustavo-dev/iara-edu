@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { base44Client } from '@/api/base44Client';
 import { submitAttempt } from '@/api/integrations';
+import { trackMissionProgress } from '@/lib/gamification';
 import { useAuth } from '@/lib/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -118,6 +119,13 @@ const PlayActivity = () => {
     setResult(res);
     setPhase('result');
     refreshUser();
+    // Track mission progress
+    if (user?.email) {
+      trackMissionProgress(user.email, 'activities_today');
+      trackMissionProgress(user.email, 'activities_week');
+      if (res?.attempt?.score >= 70) trackMissionProgress(user.email, 'correct_today', Math.round((res.attempt.score / 100) * (activity?.questions?.length || 1)));
+      if (res?.attempt?.score === 100) trackMissionProgress(user.email, 'perfect_week');
+    }
   };
 
   const score = useMemo(() => {

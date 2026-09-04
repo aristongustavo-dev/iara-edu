@@ -9,7 +9,9 @@ import { AuthProvider, useAuth } from '@/lib/AuthContext';
 import UserNotRegisteredError from '@/components/UserNotRegisteredError';
 import AppLayout from '@/components/AppLayout';
 import TourGuide from '@/components/TourGuide';
+import Onboarding from '@/components/Onboarding';
 import Home from '@/pages/Home';
+import WorldMap from '@/pages/WorldMap';
 import Dashboard from '@/pages/Dashboard';
 import Activities from '@/pages/Activities';
 import PlayActivity from '@/pages/PlayActivity';
@@ -37,9 +39,22 @@ import Acesso from '@/pages/Acesso';
 import RequireRole from '@/components/RequireRole';
 import InstallBanner from '@/components/InstallBanner';
 
+import React, { useState, useEffect } from 'react';
+
 const AuthenticatedApp = () => {
-  const { isLoadingAuth, isLoadingPublicSettings, authError, isAuthenticated, navigateToLogin } = useAuth();
+  const { isLoadingAuth, isLoadingPublicSettings, authError, isAuthenticated, navigateToLogin, user } = useAuth();
   const location = useLocation();
+  const [showOnboarding, setShowOnboarding] = useState(false);
+
+  // Check if onboarding needed (students only, first time)
+  useEffect(() => {
+    if (!isAuthenticated || !user || user.role !== 'aluno') return;
+    try {
+      if (!localStorage.getItem('iara_onboarding_done')) {
+        setShowOnboarding(true);
+      }
+    } catch (e) { /* ignore */ }
+  }, [isAuthenticated, user]);
 
   // Show loading spinner while checking app public settings or auth
   if (isLoadingPublicSettings || isLoadingAuth) {
@@ -68,10 +83,15 @@ const AuthenticatedApp = () => {
 
   // Render the main app
   return (
-    <Routes>
-      <Route path="/" element={<AppLayout currentPageName="Home"><Home /></AppLayout>} />
-      <Route path="/acesso" element={<Acesso />} />
-      <Route path="/painel-usuario" element={<AppLayout currentPageName="painel-usuario"><PainelUsuario /></AppLayout>} />
+    <>
+      {showOnboarding && <Onboarding onComplete={() => setShowOnboarding(false)} />}
+      <Routes>
+        <Route path="/" element={<AppLayout currentPageName="Home">
+          {user?.role === 'aluno' ? <WorldMap /> : <Home />}
+        </AppLayout>} />
+        <Route path="/acesso" element={<Acesso />} />
+        <Route path="/WorldMap" element={<AppLayout currentPageName="WorldMap"><WorldMap /></AppLayout>} />
+        <Route path="/painel-usuario" element={<AppLayout currentPageName="painel-usuario"><PainelUsuario /></AppLayout>} />
       <Route path="/Dashboard" element={<AppLayout currentPageName="Dashboard"><RequireRole level="admin"><Dashboard /></RequireRole></AppLayout>} />
       <Route path="/Activities" element={<AppLayout currentPageName="Activities"><Activities /></AppLayout>} />
       <Route path="/PlayActivity" element={<AppLayout currentPageName="PlayActivity"><PlayActivity /></AppLayout>} />
@@ -95,7 +115,8 @@ const AuthenticatedApp = () => {
       <Route path="/Curriculum" element={<AppLayout currentPageName="Curriculum"><Curriculum /></AppLayout>} />
       <Route path="/Profile" element={<AppLayout currentPageName="Profile"><Profile /></AppLayout>} />
       <Route path="*" element={<PageNotFound />} />
-    </Routes>
+      </Routes>
+    </>
   );
 };
 

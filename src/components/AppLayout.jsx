@@ -14,17 +14,17 @@ const isStaff = (role) => role === 'admin' || role === 'professor' || role === '
 const isAdminRole = (role) => role === 'admin' || role === 'direcao';
 
 const studentItems = [
-  { to: '/', label: 'Início', icon: Home },
+  { to: '/', label: 'Meu Mundo', icon: Map },
   { to: '/Activities', label: 'Atividades', icon: BookOpen },
-  { to: '/Farm', label: 'A Fazendinha', icon: Map },
-  { to: '/FarmShop', label: 'Loja', icon: Store },
+  { to: '/Farm', label: 'Fazenda', icon: Home },
   { to: '/FarmMissions', label: 'Missões', icon: Trophy },
+  { to: '/FarmShop', label: 'Mercado', icon: Store },
   { to: '/FarmRanking', label: 'Ranking', icon: PieChart },
   { to: '/Medals', label: 'Conquistas', icon: Medal },
-  { to: '/MyReport', label: 'Meu Relatório', icon: PieChart },
-  { to: '/Mural', label: 'Mural de Avisos', icon: Megaphone },
-  { to: '/CharacterCreation', label: 'Meu Avatar', icon: Sparkles },
-  { to: '/Profile', label: 'Meu Perfil', icon: User },
+  { to: '/MyReport', label: 'Relatório', icon: PieChart },
+  { to: '/Mural', label: 'Avisos', icon: Megaphone },
+  { to: '/CharacterCreation', label: 'Avatar', icon: Sparkles },
+  { to: '/Profile', label: 'Perfil', icon: User },
 ];
 
 const staffItems = [
