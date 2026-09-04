@@ -36,6 +36,9 @@ const TIPS = {
     'Complete desafios para ganhar medalhas! 🏅',
     'Cada medalha é uma conquista única!',
   ],
+  '3d': [
+    'Entre no mundo em 3ª pessoa! Clique em "🎮 Mundo 3D" na nav para controlar um personagem e explorar o cenário como num jogo de verdade. Use WASD para andar, Shift para correr, Espaço para pular e colete os itens brilhantes! 🎮✨',
+  ],
 };
 
 const KEYWORDS = {
@@ -79,6 +82,14 @@ const KEYWORDS = {
   badge: 'badge',
   conquista: 'badge',
   conquistas: 'badge',
+  mundo: '3d',
+  '3d': '3d',
+  '3D': '3d',
+  entrar: '3d',
+  cenário: '3d',
+  cenário: '3d',
+  game: '3d',
+  jogo: '3d',
 };
 
 const QUICK_ACTIONS = [
@@ -86,6 +97,8 @@ const QUICK_ACTIONS = [
   { label: '🌾 Fazenda', route: '/Farm' },
   { label: '🎯 Missões', route: '/FarmMissions' },
   { label: '🏅 Conquistas', route: '/Medals' },
+  { label: '🎮 Mundo 3D', route: '/World3D' },
+  { label: '🗺️ Meu Mundo', route: '/' },
 ];
 
 const IaraAssistant = ({ onClose }) => {

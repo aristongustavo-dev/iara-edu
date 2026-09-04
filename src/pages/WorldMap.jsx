@@ -345,6 +345,11 @@ const WorldMap = () => {
           <span className="text-xl">🏅</span>
           <p className="text-xs font-bold text-foreground mt-1">Conquistas</p>
         </button>
+        <button onClick={() => navigate('/World3D')} className="bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl border border-blue-400/30 p-3 text-left hover:from-blue-600 hover:to-purple-700 transition-all col-span-2 md:col-span-1 shadow-lg">
+          <span className="text-xl">🎮</span>
+          <p className="text-xs font-bold text-white mt-1">Entrar no Mundo 3D</p>
+          <p className="text-[10px] text-white/70">Explore em 3ª pessoa</p>
+        </button>
       </div>
 
       {showAssistant && <IaraAssistant onClose={() => setShowAssistant(false)} />}

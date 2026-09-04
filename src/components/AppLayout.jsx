@@ -5,6 +5,7 @@ import {
   Home, Map, Medal, User, LogOut, BookOpen, Trophy, LayoutDashboard,
   ClipboardList, Users, GraduationCap, CalendarCheck, FileBarChart2,
   Megaphone, Store, Sparkles, PieChart, Menu, X, HelpCircle,
+  Gamepad2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { MermaidLogo } from '@/components/ui/MermaidLogo';
@@ -21,6 +22,7 @@ const studentItems = [
   { to: '/FarmShop', label: 'Mercado', icon: Store },
   { to: '/FarmRanking', label: 'Ranking', icon: PieChart },
   { to: '/Medals', label: 'Conquistas', icon: Medal },
+  { to: '/World3D', label: 'Mundo 3D', icon: Gamepad2 },
   { to: '/MyReport', label: 'Relatório', icon: PieChart },
   { to: '/Mural', label: 'Avisos', icon: Megaphone },
   { to: '/CharacterCreation', label: 'Avatar', icon: Sparkles },

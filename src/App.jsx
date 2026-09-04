@@ -12,6 +12,8 @@ import TourGuide from '@/components/TourGuide';
 import Onboarding from '@/components/Onboarding';
 import Home from '@/pages/Home';
 import WorldMap from '@/pages/WorldMap';
+import { lazy, Suspense } from 'react';
+const GameWorld = lazy(() => import('@/game/GameWorld'));
 import Dashboard from '@/pages/Dashboard';
 import Activities from '@/pages/Activities';
 import PlayActivity from '@/pages/PlayActivity';
@@ -113,8 +115,13 @@ const AuthenticatedApp = () => {
       <Route path="/FarmRanking" element={<AppLayout currentPageName="FarmRanking"><FarmRanking /></AppLayout>} />
       <Route path="/FarmAdmin" element={<AppLayout currentPageName="FarmAdmin"><FarmAdmin /></AppLayout>} />
       <Route path="/Curriculum" element={<AppLayout currentPageName="Curriculum"><Curriculum /></AppLayout>} />
-      <Route path="/Profile" element={<AppLayout currentPageName="Profile"><Profile /></AppLayout>} />
-      <Route path="*" element={<PageNotFound />} />
+<Route path="/Profile" element={<AppLayout currentPageName="Profile"><Profile /></AppLayout>} />
+        <Route path="/World3D" element={
+          <Suspense fallback={<div className="fixed inset-0 z-[100] bg-gradient-to-b from-blue-400 to-green-400 flex items-center justify-center"><div className="text-center"><div className="text-6xl mb-4">🏫</div><p className="text-white font-bold">Carregando mundo 3D...</p></div></div>}>
+            <GameWorld onClose={() => navigate('/')} />
+          </Suspense>
+        } />
+        <Route path="*" element={<PageNotFound />} />
       </Routes>
     </>
   );

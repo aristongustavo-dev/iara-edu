@@ -95,6 +95,10 @@ export function awardReward(email, eventType, context = {}) {
       xpGain = XP_REWARDS.HARVEST(context.cropXp);
       coinGain = COIN_REWARDS.HARVEST(context.cropMilhos);
       break;
+    case 'WORLD_COLLECT':
+      xpGain = context.extraXp || 10;
+      coinGain = context.extraCoins || 1;
+      break;
     case 'STREAK_BONUS':
       xpGain = XP_REWARDS.STREAK_BONUS(context.streakDays || 0);
       coinGain = COIN_REWARDS.STREAK_BONUS(context.streakDays || 0);
