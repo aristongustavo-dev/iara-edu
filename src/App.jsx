@@ -14,6 +14,7 @@ import Home from '@/pages/Home';
 import WorldMap from '@/pages/WorldMap';
 import { lazy, Suspense } from 'react';
 const GameWorld = lazy(() => import('@/game/GameWorld'));
+const Farm3D = lazy(() => import('@/game/Farm3D'));
 import Dashboard from '@/pages/Dashboard';
 import Activities from '@/pages/Activities';
 import PlayActivity from '@/pages/PlayActivity';
@@ -51,12 +52,14 @@ const AuthenticatedApp = () => {
   // Check if onboarding needed (students only, first time)
   useEffect(() => {
     if (!isAuthenticated || !user || user.role !== 'aluno') return;
+    const gameRoutes = ['/World3D', '/Farm3D', '/GameMap'];
+    if (gameRoutes.some((r) => location.pathname.startsWith(r))) return;
     try {
       if (!localStorage.getItem('iara_onboarding_done')) {
         setShowOnboarding(true);
       }
     } catch (e) { /* ignore */ }
-  }, [isAuthenticated, user]);
+  }, [isAuthenticated, user, location.pathname]);
 
   // Show loading spinner while checking app public settings or auth
   if (isLoadingPublicSettings || isLoadingAuth) {
@@ -119,6 +122,11 @@ const AuthenticatedApp = () => {
         <Route path="/World3D" element={
           <Suspense fallback={<div className="fixed inset-0 z-[100] bg-gradient-to-b from-blue-400 to-green-400 flex items-center justify-center"><div className="text-center"><div className="text-6xl mb-4">🏫</div><p className="text-white font-bold">Carregando mundo 3D...</p></div></div>}>
             <GameWorld onClose={() => navigate('/')} />
+          </Suspense>
+        } />
+        <Route path="/Farm3D" element={
+          <Suspense fallback={<div className="fixed inset-0 z-[100] bg-gradient-to-b from-sky-400 to-green-400 flex items-center justify-center"><div className="text-center"><div className="text-6xl mb-4">🌾</div><p className="text-white font-bold">Carregando Fazendinha 3D...</p></div></div>}>
+            <Farm3D onClose={() => navigate('/Farm')} onOpenClassic={() => navigate('/Farm')} />
           </Suspense>
         } />
         <Route path="*" element={<PageNotFound />} />

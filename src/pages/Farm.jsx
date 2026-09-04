@@ -80,7 +80,8 @@ const Farm = () => {
         subtitle={themedEvent ? `Evento ativo — ganho de XP bônus!` : 'Cultive, construa e cresça estudando!'}
         icon="🏡"
         actions={
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
+            <Link to="/Farm3D"><Button variant="primary" size="sm">🎮 Entrar na Fazendinha 3D</Button></Link>
             <Link to="/FarmShop"><Button variant="secondary" size="sm"><Plus size={16}/> Loja</Button></Link>
             <Link to="/FarmMissions"><Button variant="secondary" size="sm"><Zap size={16}/> Missões</Button></Link>
             <Link to="/FarmRanking"><Button variant="secondary" size="sm">🏆 Ranking</Button></Link>

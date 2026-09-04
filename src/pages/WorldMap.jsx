@@ -333,9 +333,14 @@ const WorldMap = () => {
           <span className="text-xl">📝</span>
           <p className="text-xs font-bold text-foreground mt-1">Atividades</p>
         </button>
-        <button onClick={() => navigate('/Farm')} className="bg-card rounded-xl border border-border p-3 text-left hover:bg-muted transition-colors">
+        <button onClick={() => navigate('/Farm3D')} className="bg-card rounded-xl border border-border p-3 text-left hover:bg-muted transition-colors">
           <span className="text-xl">🌾</span>
-          <p className="text-xs font-bold text-foreground mt-1">Fazenda</p>
+          <p className="text-xs font-bold text-foreground mt-1">Fazenda 3D</p>
+          <p className="text-[10px] text-muted-foreground">Ande pelo campo</p>
+        </button>
+        <button onClick={() => navigate('/Farm')} className="bg-card rounded-xl border border-border p-3 text-left hover:bg-muted transition-colors">
+          <span className="text-xl">🌱</span>
+          <p className="text-xs font-bold text-foreground mt-1">Fazenda Clássica</p>
         </button>
         <button onClick={() => navigate('/FarmMissions')} className="bg-card rounded-xl border border-border p-3 text-left hover:bg-muted transition-colors">
           <span className="text-xl">🎯</span>
