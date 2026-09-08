@@ -9,10 +9,11 @@ import { awardReward } from '@/lib/gamification';
 import { useAuth } from '@/lib/AuthContext';
 import { touchInput, setTouchInput } from './input';
 import { getOrCreateFarm, getFarmFor, plantCrop, harvestCrop, advanceFarmDay } from '@/api/farm';
-import { CROPS } from '@/api/integrations';
+import { CROPS, getOrCreateCharacter } from '@/api/integrations';
+import { avatarThemeFor } from './avatarTheme';
 import {
   RIVER, BRIDGE, MATERIALS, START_MATERIALS, CHALLENGE_REWARD_MATERIALS,
-  QUESTIONS, ARENA_ROUNDS, CITY, ARENA, NPC_DIALOGS,
+  QUESTIONS, ARENA_ROUNDS, CITY, ARENA, NPC_DIALOGS, LANDMARKS,
 } from './worldContent';
 
 const GRAVITY = -20;
@@ -27,6 +28,7 @@ const FEET_Y_CROUCH = GROUND_TOP + 0.5;
 const WORLD_BOUNDS = 36;
 const INSTANCE_CAP = 8000;
 const PICK_RANGE = 1.9;
+const PLAYER_BODY_PALETTE = ['#4A90D9', '#E74C3C', '#27AE60', '#F39C12', '#9B59B6', '#00BCD4'];
 
 const keyMap = [
   { name: 'forward', keys: ['KeyW', 'ArrowUp'] },
@@ -149,7 +151,13 @@ const NPCS = [
 
 const WORKSITE = { x: 0, z: 17, label: 'Ponte', name: 'Canteiro da Ponte' };
 
-const worldShared = { front: null, ghost: { x: 0, y: 0, z: 0, ok: false, color: '#ffffff', visible: false }, rot: 0 };
+const worldShared = {
+  front: null,
+  ghost: { x: 0, y: 0, z: 0, ok: false, color: '#ffffff', visible: false },
+  rot: 0,
+  moving: false,
+  cam: { yaw: 0, pitch: 0.59, dist: 8.2 },
+};
 
 const makeOccSet = (placed, crops) => {
   const set = new Set(STATIC_WORLD.occKeys);
@@ -550,24 +558,69 @@ function Lighting() {
   );
 }
 
-function ThirdPersonCamera({ target }) {
-  const { camera } = useThree();
-  const offset = useRef(new THREE.Vector3(0, 4.6, 6.8));
-  const currentPos = useRef(new THREE.Vector3());
-  const currentLookAt = useRef(new THREE.Vector3());
+function OrbitCamera({ target }) {
+  const { camera, gl } = useThree();
+  const st = useRef({ ...worldShared.cam });
+  const cur = useRef({ ...worldShared.cam });
+  const lookCur = useRef(new THREE.Vector3());
+  const dragging = useRef(false);
+  const last = useRef({ x: 0, y: 0 });
+
+  useEffect(() => {
+    const el = gl.domElement;
+    const onDown = (e) => {
+      dragging.current = true;
+      last.current = { x: e.clientX, y: e.clientY };
+    };
+    const onMove = (e) => {
+      if (!dragging.current) return;
+      const dx = e.clientX - last.current.x;
+      const dy = e.clientY - last.current.y;
+      last.current = { x: e.clientX, y: e.clientY };
+      st.current.yaw -= dx * 0.006;
+      st.current.pitch = THREE.MathUtils.clamp(st.current.pitch + dy * 0.006, 0.08, 1.25);
+    };
+    const onUp = () => { dragging.current = false; };
+    const onWheel = (e) => {
+      e.preventDefault();
+      st.current.dist = THREE.MathUtils.clamp(st.current.dist + e.deltaY * 0.01, 4.5, 13);
+    };
+    el.addEventListener('pointerdown', onDown);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => {
+      el.removeEventListener('pointerdown', onDown);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      el.removeEventListener('wheel', onWheel);
+    };
+  }, [gl]);
 
   useFrame((_, delta) => {
     const playerPos = target?.current;
     if (!playerPos) return;
-    const desiredPos = new THREE.Vector3(
-      playerPos.x + offset.current.x,
-      playerPos.y + offset.current.y,
-      playerPos.z + offset.current.z
+    worldShared.cam.yaw = st.current.yaw;
+    worldShared.cam.pitch = st.current.pitch;
+    worldShared.cam.dist = st.current.dist;
+
+    const k = 1 - Math.pow(0.0005, delta);
+    cur.current.yaw += (st.current.yaw - cur.current.yaw) * k;
+    cur.current.pitch += (st.current.pitch - cur.current.pitch) * k;
+    cur.current.dist += (st.current.dist - cur.current.dist) * k;
+
+    const cp = Math.cos(cur.current.pitch);
+    const sy = Math.sin(cur.current.yaw);
+    const cy = Math.cos(cur.current.yaw);
+    const desired = new THREE.Vector3(
+      playerPos.x + sy * cur.current.dist * cp,
+      playerPos.y + Math.sin(cur.current.pitch) * cur.current.dist,
+      playerPos.z + cy * cur.current.dist * cp
     );
-    currentPos.current.lerp(desiredPos, 1 - Math.pow(0.001, delta));
-    currentLookAt.current.lerp(playerPos, 1 - Math.pow(0.001, delta));
-    camera.position.copy(currentPos.current);
-    camera.lookAt(currentLookAt.current);
+    camera.position.lerp(desired, 1 - Math.pow(0.0005, delta));
+    const look = new THREE.Vector3(playerPos.x, playerPos.y + 0.6, playerPos.z);
+    lookCur.current.lerp(look, 1 - Math.pow(0.0005, delta));
+    camera.lookAt(lookCur.current);
   });
 
   return null;
@@ -578,37 +631,52 @@ function VoxelPlayer({
   initialPosition = [0, FEET_Y, 8],
   seedColor,
   solidAt,
+  avatar,
 }) {
   const meshRef = useRef();
   const velocity = useRef(new THREE.Vector3());
   const isGrounded = useRef(true);
   const [, getKeys] = useKeyboardControls();
-  const bodyColor = useMemo(() => {
-    const palette = ['#4A90D9', '#E74C3C', '#27AE60', '#F39C12', '#9B59B6', '#00BCD4'];
+
+  const fallbackColor = useMemo(() => {
     let h = 0;
     const s = seedColor || '';
     for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-    return palette[h % palette.length];
+    return PLAYER_BODY_PALETTE[h % PLAYER_BODY_PALETTE.length];
   }, [seedColor]);
+  const shirt = avatar?.shirt || fallbackColor;
+  const pants = avatar?.pants || '#2E3A4B';
+  const skin = avatar?.skin || '#FFD5B4';
+  const hair = avatar?.hair || '#2B2B2B';
 
   useFrame((state, delta) => {
     if (!meshRef.current) return;
     const keys = getKeys();
-    const direction = new THREE.Vector3();
-    if (keys.forward) direction.z -= 1;
-    if (keys.backward) direction.z += 1;
-    if (keys.left) direction.x -= 1;
-    if (keys.right) direction.x += 1;
+    const cam = worldShared.cam || { yaw: 0 };
+    const yaw = cam.yaw || 0;
+    const cosY = Math.cos(yaw);
+    const sinY = Math.sin(yaw);
+
+    let ix = 0;
+    let iz = 0;
+    if (keys.forward) iz -= 1;
+    if (keys.backward) iz += 1;
+    if (keys.left) ix -= 1;
+    if (keys.right) ix += 1;
     const t = touchInput.move;
     if (t && (t.x !== 0 || t.y !== 0)) {
-      direction.x += t.x;
-      direction.z -= t.y;
+      ix += t.x;
+      iz -= t.y;
     }
-    direction.normalize();
+
+    const direction = new THREE.Vector3(cosY * ix + sinY * iz, 0, -sinY * ix + cosY * iz);
+    const hasInput = direction.lengthSq() > 0.000001;
+    if (hasInput) direction.normalize();
+
     const crouch = !!keys.crouch;
     const speed = crouch ? CROUCH_SPEED : (keys.run || touchInput.run) ? RUN_SPEED : WALK_SPEED;
 
-    if (direction.length() > 0) {
+    if (hasInput) {
       const angle = Math.atan2(direction.x, direction.z);
       meshRef.current.rotation.y = angle;
       worldShared.rot = angle;
@@ -648,6 +716,8 @@ function VoxelPlayer({
     pos.x = THREE.MathUtils.clamp(pos.x, -WORLD_BOUNDS, WORLD_BOUNDS);
     pos.z = THREE.MathUtils.clamp(pos.z, -WORLD_BOUNDS, WORLD_BOUNDS);
 
+    worldShared.moving = Math.abs(velocity.current.x) > 0.02 || Math.abs(velocity.current.z) > 0.02;
+
     if (positionRef) positionRef.current = pos;
   });
 
@@ -655,15 +725,19 @@ function VoxelPlayer({
     <group ref={meshRef} position={initialPosition}>
       <mesh position={[0, -0.25, 0]} castShadow>
         <boxGeometry args={[0.32, 0.5, 0.32]} />
-        <meshStandardMaterial color="#2E3A4B" />
+        <meshStandardMaterial color={pants} />
       </mesh>
       <mesh position={[0, 0.15, 0]} castShadow>
         <boxGeometry args={[0.58, 0.62, 0.34]} />
-        <meshStandardMaterial color={bodyColor} />
+        <meshStandardMaterial color={shirt} />
       </mesh>
       <mesh position={[0, 0.58, 0]} castShadow>
         <boxGeometry args={[0.52, 0.5, 0.42]} />
-        <meshStandardMaterial color="#FFD5B4" />
+        <meshStandardMaterial color={skin} />
+      </mesh>
+      <mesh position={[0, 0.85, 0]}>
+        <boxGeometry args={[0.54, 0.16, 0.44]} />
+        <meshStandardMaterial color={hair} />
       </mesh>
       <mesh position={[-0.11, 0.66, 0.22]}>
         <boxGeometry args={[0.08, 0.1, 0.02]} />
@@ -739,8 +813,202 @@ function Collectibles({ items, playerRef, onCollect }) {
     ));
 }
 
-function GameScene({ playerPosRef, placed, crops, mode, seedColor, onCollect, progress }) {
-  const spawn = spawnFromHash();
+function LabelSprite({ text, position, color }) {
+  const tex = useMemo(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, 512, 128);
+    const r = 26;
+    ctx.fillStyle = 'rgba(18,18,38,0.82)';
+    ctx.beginPath();
+    ctx.moveTo(r, 6);
+    ctx.arcTo(506, 6, 506, 122, r);
+    ctx.arcTo(506, 122, 6, 122, r);
+    ctx.arcTo(6, 122, 6, 6, r);
+    ctx.arcTo(6, 6, 506, 6, r);
+    ctx.closePath();
+    ctx.fill();
+    ctx.lineWidth = 7;
+    ctx.strokeStyle = color || '#FFD700';
+    ctx.stroke();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.font = 'bold 52px "Segoe UI", Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, 256, 65);
+    const t = new THREE.CanvasTexture(canvas);
+    t.anisotropy = 4;
+    return t;
+  }, [text, color]);
+
+  return (
+    <sprite position={position} scale={[5.4, 1.35, 1]}>
+      <spriteMaterial map={tex} transparent depthWrite={false} />
+    </sprite>
+  );
+}
+
+function LandmarkLabels() {
+  return LANDMARKS.map((l) => (
+    <LabelSprite key={l.label} text={l.label} color={l.c} position={[l.p[0], l.y, l.p[1]]} />
+  ));
+}
+
+function Clouds() {
+  const refs = useRef([]);
+  const INIT = [
+    [-20, 16, -18], [10, 18, 5], [-6, 15, 22], [24, 17, -10],
+  ];
+  useFrame((state) => {
+    const t = state.clock.elapsedTime;
+    refs.current.forEach((g, i) => {
+      if (!g) return;
+      const base = INIT[i] || [0, 16, 0];
+      g.position.x = base[0] + ((t * 1.2 + i * 24) % 96) - 12;
+      g.position.z = base[2] + Math.sin(t * 0.25 + i * 2.1) * 3;
+    });
+  });
+  return INIT.map((c, i) => (
+    <group key={i} ref={(el) => { refs.current[i] = el; }} position={c}>
+      <mesh>
+        <boxGeometry args={[5, 1.1, 2.6]} />
+        <meshStandardMaterial color="#FFFFFF" transparent opacity={0.85} />
+      </mesh>
+      <mesh position={[-1.6, 0.45, 0]}>
+        <boxGeometry args={[2.8, 0.9, 2]} />
+        <meshStandardMaterial color="#FFFFFF" transparent opacity={0.85} />
+      </mesh>
+      <mesh position={[1.8, 0.4, 0.3]}>
+        <boxGeometry args={[2.4, 0.8, 1.8]} />
+        <meshStandardMaterial color="#FFFFFF" transparent opacity={0.85} />
+      </mesh>
+    </group>
+  ));
+}
+
+function WaterShimmer() {
+  const matA = useRef();
+  const matB = useRef();
+  useFrame((state) => {
+    const o = 0.22 + Math.sin(state.clock.elapsedTime * 1.4) * 0.1;
+    if (matA.current) matA.current.opacity = o;
+    if (matB.current) matB.current.opacity = o + 0.04;
+  });
+  return (
+    <group>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.33, 23]}>
+        <planeGeometry args={[72, 2]} />
+        <meshStandardMaterial ref={matA} color="#5EC7FA" transparent depthWrite={false} side={THREE.DoubleSide} renderOrder={2} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[28, 0.33, 22]}>
+        <planeGeometry args={[4, 4]} />
+        <meshStandardMaterial ref={matB} color="#5EC7FA" transparent depthWrite={false} side={THREE.DoubleSide} renderOrder={2} />
+      </mesh>
+    </group>
+  );
+}
+
+function Birds() {
+  const g1 = useRef();
+  const g2 = useRef();
+  useFrame((state) => {
+    const t = state.clock.elapsedTime;
+    const fl = Math.sin(t * 10) * 0.5;
+    if (g1.current) {
+      g1.current.position.set(6 + Math.cos(t * 0.5) * 11, 10 + Math.sin(t * 0.9) * 1.4, 4 + Math.sin(t * 0.5) * 11);
+      g1.current.rotation.y = -t * 0.5;
+      if (g1.current.children[1]) g1.current.children[1].rotation.z = fl;
+      if (g1.current.children[2]) g1.current.children[2].rotation.z = -fl;
+    }
+    if (g2.current) {
+      g2.current.position.set(-8 + Math.cos(t * 0.4 + 3) * 9, 12 + Math.sin(t * 0.7 + 1) * 1.6, -6 + Math.sin(t * 0.4 + 3) * 9);
+      g2.current.rotation.y = -t * 0.4;
+      if (g2.current.children[1]) g2.current.children[1].rotation.z = fl;
+      if (g2.current.children[2]) g2.current.children[2].rotation.z = -fl;
+    }
+  });
+  return (
+    <>
+      <group ref={g1}>
+        <mesh>
+          <boxGeometry args={[0.16, 0.14, 0.34]} />
+          <meshStandardMaterial color="#263238" />
+        </mesh>
+        <mesh position={[-0.22, 0.05, 0]}>
+          <boxGeometry args={[0.32, 0.05, 0.14]} />
+          <meshStandardMaterial color="#37474F" />
+        </mesh>
+        <mesh position={[0.22, 0.05, 0]}>
+          <boxGeometry args={[0.32, 0.05, 0.14]} />
+          <meshStandardMaterial color="#37474F" />
+        </mesh>
+      </group>
+      <group ref={g2}>
+        <mesh>
+          <boxGeometry args={[0.16, 0.14, 0.34]} />
+          <meshStandardMaterial color="#263238" />
+        </mesh>
+        <mesh position={[-0.22, 0.05, 0]}>
+          <boxGeometry args={[0.32, 0.05, 0.14]} />
+          <meshStandardMaterial color="#37474F" />
+        </mesh>
+        <mesh position={[0.22, 0.05, 0]}>
+          <boxGeometry args={[0.32, 0.05, 0.14]} />
+          <meshStandardMaterial color="#37474F" />
+        </mesh>
+      </group>
+    </>
+  );
+}
+
+function IaraCompanion({ playerPosRef }) {
+  const ref = useRef();
+  useFrame((state, delta) => {
+    const g = ref.current;
+    const p = playerPosRef?.current;
+    if (!g || !p) return;
+    const cam = worldShared.cam || { yaw: 0 };
+    const yaw = cam.yaw || 0;
+    const sy = Math.sin(yaw);
+    const cy = Math.cos(yaw);
+    const tx = p.x + sy * 1.4 + cy * -1.9;
+    const tz = p.z + cy * 1.4 + sy * 1.9;
+    const k = Math.min(1, delta * 4);
+    g.position.x += (tx - g.position.x) * k;
+    g.position.z += (tz - g.position.z) * k;
+    const bobY = FEET_Y + Math.sin(state.clock.elapsedTime * 2.2) * 0.12;
+    g.position.y += (bobY - g.position.y) * Math.min(1, delta * 6);
+    g.rotation.y = Math.atan2(p.x - g.position.x, p.z - g.position.z);
+  });
+  return (
+    <group ref={ref} position={[playerPosRef?.current?.x ?? 0, FEET_Y, playerPosRef?.current?.z ?? 8]}>
+      <mesh position={[0, 0.15, 0]} castShadow>
+        <boxGeometry args={[0.5, 0.6, 0.32]} />
+        <meshStandardMaterial color="#7C3AED" />
+      </mesh>
+      <mesh position={[0, 0.55, 0]} castShadow>
+        <boxGeometry args={[0.45, 0.42, 0.38]} />
+        <meshStandardMaterial color="#FFD5B4" />
+      </mesh>
+      <mesh position={[-0.09, 0.62, 0.2]}>
+        <boxGeometry args={[0.07, 0.09, 0.02]} />
+        <meshStandardMaterial color="#2B2B2B" />
+      </mesh>
+      <mesh position={[0.09, 0.62, 0.2]}>
+        <boxGeometry args={[0.07, 0.09, 0.02]} />
+        <meshStandardMaterial color="#2B2B2B" />
+      </mesh>
+      <mesh position={[0, 1.08, 0]}>
+        <boxGeometry args={[0.18, 0.18, 0.18]} />
+        <meshStandardMaterial color="#FFD700" emissive="#FFD700" emissiveIntensity={0.7} />
+      </mesh>
+    </group>
+  );
+}
+
+function GameScene({ playerPosRef, placed, crops, mode, seedColor, onCollect, progress, avatar, iaraGuide, spawnPos }) {
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
@@ -790,12 +1058,13 @@ function GameScene({ playerPosRef, placed, crops, mode, seedColor, onCollect, pr
   return (
     <>
       <Lighting />
-      <ThirdPersonCamera target={playerPosRef} />
+      <OrbitCamera target={playerPosRef} />
       <KeyboardControls map={keyMap}>
         <VoxelPlayer
           positionRef={playerPosRef}
           seedColor={seedColor}
-          initialPosition={spawn ? [spawn.x, FEET_Y, spawn.z] : [0, FEET_Y, 8]}
+          avatar={avatar}
+          initialPosition={spawnPos ? [spawnPos.x, FEET_Y, spawnPos.z] : [0, FEET_Y, 8]}
           solidAt={solidAt}
         />
       </KeyboardControls>
@@ -804,13 +1073,19 @@ function GameScene({ playerPosRef, placed, crops, mode, seedColor, onCollect, pr
 
       <CropLayer crops={Object.values(crops)} now={now} />
 
-      {NPCS.map((n) => (
+      {iaraGuide && <IaraCompanion playerPosRef={playerPosRef} />}
+      {NPCS.filter((n) => !iaraGuide || n.label !== 'IARA').map((n) => (
         <VoxelNPC key={n.label} position={[n.p[0], n.p[1]]} color={n.c} />
       ))}
 
       <Collectibles items={COLLECTIBLES} playerRef={playerPosRef} onCollect={onCollect} />
 
       <Ghost />
+
+      <Clouds />
+      <WaterShimmer />
+      <Birds />
+      <LandmarkLabels />
     </>
   );
 }
@@ -1316,14 +1591,6 @@ const GameWorld = ({ onClose, seedColor }) => {
   const [notifications, setNotifications] = useState([]);
   const [farm, setFarm] = useState(null);
 
-  const spawn = spawnFromHash();
-  const playerPosRef = useRef(new THREE.Vector3(spawn?.x ?? 0, FEET_Y, spawn?.z ?? 8));
-  const [posSnapshot, setPosSnapshot] = useState({ x: spawn?.x ?? 0, z: spawn?.z ?? 8 });
-
-  const [page, setPage] = useState(0);
-  const [blockOffset, setBlockOffset] = useState(0);
-  const [slot, setSlot] = useState(0);
-
   const parseSaved = () => {
     try {
       const raw = localStorage.getItem(storageKey);
@@ -1335,12 +1602,26 @@ const GameWorld = ({ onClose, seedColor }) => {
           blocks: parsed.blocks || START_KIT,
           materials: { ...START_MATERIALS, ...(parsed.materials || {}) },
           story: { ...defaultStory(), ...(parsed.story || {}) },
+          checkpoint: parsed.checkpoint || null,
         };
       }
     } catch (e) {}
-    return { placed: {}, crops: {}, blocks: START_KIT, materials: { ...START_MATERIALS }, story: defaultStory() };
+    return { placed: {}, crops: {}, blocks: START_KIT, materials: { ...START_MATERIALS }, story: defaultStory(), checkpoint: null };
   };
   const [saved] = useState(parseSaved);
+  const [character, setCharacter] = useState(null);
+  const [checkpoint, setCheckpoint] = useState(null);
+
+  const spawn = spawnFromHash();
+  const spawnPos = spawn || saved.checkpoint || null;
+  const playerPosRef = useRef(new THREE.Vector3(spawnPos?.x ?? 0, FEET_Y, spawnPos?.z ?? 8));
+  const [posSnapshot, setPosSnapshot] = useState({ x: spawnPos?.x ?? 0, z: spawnPos?.z ?? 8 });
+
+  const [page, setPage] = useState(0);
+  const [blockOffset, setBlockOffset] = useState(0);
+  const [slot, setSlot] = useState(0);
+
+  const avatar = useMemo(() => avatarThemeFor(character, user?.email || 'iara'), [character, user]);
 
   const [placed, setPlaced] = useState(saved.placed);
   const [crops, setCrops] = useState(saved.crops);
@@ -1354,9 +1635,9 @@ const GameWorld = ({ onClose, seedColor }) => {
 
   useEffect(() => {
     try {
-      localStorage.setItem(storageKey, JSON.stringify({ placed, crops, blocks, materials, story }));
+      localStorage.setItem(storageKey, JSON.stringify({ placed, crops, blocks, materials, story, checkpoint }));
     } catch (e) {}
-  }, [placed, crops, blocks, materials, story, storageKey]);
+  }, [placed, crops, blocks, materials, story, checkpoint, storageKey]);
 
   useEffect(() => {
     const t = setTimeout(() => setLoaded(true), 1200);
@@ -1383,6 +1664,13 @@ const GameWorld = ({ onClose, seedColor }) => {
   }, [user]);
 
   useEffect(() => {
+    if (!user?.email) return;
+    try {
+      setCharacter(getOrCreateCharacter(user));
+    } catch (e) { /* avatar fallback: seed por email */ }
+  }, [user]);
+
+  useEffect(() => {
     worldRef.current = buildMultiWorld({ placed, crops, progress: story });
   }, [placed, crops, story]);
 
@@ -1402,6 +1690,12 @@ const GameWorld = ({ onClose, seedColor }) => {
       const p = playerPosRef.current;
       if (!p) return;
       setPosSnapshot({ x: p.x, z: p.z });
+      if (worldShared.moving) {
+        setCheckpoint((prev) => {
+          if (prev && Math.hypot(p.x - prev.x, p.z - prev.z) < 1.5) return prev;
+          return { x: p.x, z: p.z };
+        });
+      }
       if (p.z > CITY.entranceZ && !story.cityUnlocked && story.planks.every(Boolean)) {
         setStory((s) => ({ ...s, cityUnlocked: true }));
         pushToast('🎉 NOVA REGIÃO DESBLOQUEADA: Cidade da Matemática!');
@@ -1740,6 +2034,9 @@ const GameWorld = ({ onClose, seedColor }) => {
           <kbd className="bg-white/20 px-1 rounded">ESPAÇO</kbd> Pular · <kbd className="bg-white/20 px-1 rounded">C</kbd> Agachar
         </p>
         <p className="mt-1">
+          🖱️ Arraste para girar a câmera · Role para aproximar/afastar · A IARA te acompanha!
+        </p>
+        <p className="mt-1">
           <kbd className="bg-white/20 px-1 rounded">F</kbd> Colocar/Plantar · <kbd className="bg-white/20 px-1 rounded">R</kbd> Remover ·{' '}
           <kbd className="bg-white/20 px-1 rounded">E</kbd> Colher/Interagir · <kbd className="bg-white/20 px-1 rounded">Q</kbd> Página ·{' '}
           <kbd className="bg-white/20 px-1 rounded">TAB</kbd> Inventário · <kbd className="bg-white/20 px-1 rounded">M</kbd> Mapa
@@ -1808,6 +2105,9 @@ const GameWorld = ({ onClose, seedColor }) => {
             crops={crops}
             mode={page === 0 ? 'build' : 'plant'}
             seedColor={seedColor || user?.email}
+            avatar={avatar}
+            iaraGuide={loaded && story.iaraDialogSeen}
+            spawnPos={spawnPos}
             onCollect={handleCollect}
             progress={story}
           />

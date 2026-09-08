@@ -54,6 +54,13 @@ export const ARENA = {
   npc: { x: -20.5, z: -11.6, c: '#F39C12', label: 'Árbitro da Arena' },
 };
 
+export const LANDMARKS = [
+  { label: 'Escola do Conhecimento', p: [0, -13], y: 6.8, c: '#5DADE2' },
+  { label: 'Fazenda Matemática', p: [-12, 10], y: 5.5, c: '#27AE60' },
+  { label: 'Praça Central', p: [0, -3], y: 4, c: '#F39C12' },
+  { label: 'Biblioteca das Fórmulas', p: [0.5, 30], y: 8.6, c: '#8B4513' },
+];
+
 export const NPC_DIALOGS = {
   IARA: 'Ariston, temos um problema. A ponte para a Cidade da Matemática está quebrada! Responda Desafios Matemáticos para ganhar materiais e reconstruí-la. Vamos lá?',
   Professor: 'A matemática é a ponte entre o problema e a solução. Ganhe materiais respondendo questões!',
