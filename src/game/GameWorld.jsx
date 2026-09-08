@@ -1610,7 +1610,7 @@ const GameWorld = ({ onClose, seedColor }) => {
   };
   const [saved] = useState(parseSaved);
   const [character, setCharacter] = useState(null);
-  const [checkpoint, setCheckpoint] = useState(null);
+  const [checkpoint, setCheckpoint] = useState(saved.checkpoint);
 
   const spawn = spawnFromHash();
   const spawnPos = spawn || saved.checkpoint || null;
