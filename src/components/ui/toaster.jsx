@@ -12,11 +12,15 @@ const push = (data) => {
   return id;
 };
 
-export const toast = {
-  success: (title, description) => push({ title, description, tone: 'success' }),
-  error: (title, description) => push({ title, description, tone: 'error' }),
-  info: (title, description) => push({ title, description, tone: 'info' }),
-};
+function toastFn(data) {
+  const tone = data?.variant === 'destructive' ? 'error' : data?.variant === 'success' ? 'success' : 'info';
+  return push({ title: data?.title, description: data?.description, tone, duration: data?.duration });
+}
+toastFn.success = (title, description, duration) => push({ title, description, tone: 'success', duration });
+toastFn.error = (title, description, duration) => push({ title, description, tone: 'error', duration });
+toastFn.info = (title, description, duration) => push({ title, description, tone: 'info', duration });
+
+export const toast = toastFn;
 
 function useToastBus() {
   const [items, setItems] = useState({});
