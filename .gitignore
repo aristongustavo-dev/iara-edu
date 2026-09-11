@@ -18,3 +18,5 @@ server-data/
 
 .vercel
 .env*
+
+preview_log.txt
