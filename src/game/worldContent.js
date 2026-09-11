@@ -198,3 +198,38 @@ export const EXPLORATION_REDEEM_ITEMS = [
   { id: 'fogos', type: 'decor', icon: '🎆', name: 'Fogos de Artifício', points: 20, decor: 'fireworks' },
   { id: 'coroa', type: 'decor', icon: '👑', name: 'Coroa do Saber', points: 40, decor: 'crown' },
 ];
+
+export function farmBuildingCells(farm) {
+  const buildings = farm?.buildings || [];
+  if (!buildings.length) return [];
+  const cells = [];
+  buildings.forEach((b, i) => {
+    const spec = BUILDING_3D[b.id];
+    const slot = FARM_ZONE.slots[i % FARM_ZONE.slots.length];
+    if (!spec || !slot) return;
+    const w = spec.w || 4;
+    const d = spec.d || 4;
+    const h = spec.h || 3;
+    const x0 = Math.round(slot.p[0] - w / 2);
+    const z0 = Math.round(slot.p[1] - d / 2);
+    const cx = Math.round(slot.p[0]);
+    for (let y = 1; y <= h; y++) {
+      for (let x = x0; x < x0 + w; x++) {
+        for (let z = z0; z < z0 + d; z++) {
+          const edge = x === x0 || x === x0 + w - 1 || z === z0 || z === z0 + d - 1;
+          if (!edge) continue;
+          const isFront = z === z0;
+          if (isFront && x === cx && y <= 2) continue;
+          cells.push({ x, y, z, c: spec.wall });
+        }
+      }
+    }
+    for (let x = x0; x < x0 + w; x++) {
+      for (let z = z0; z < z0 + d; z++) {
+        cells.push({ x, y: h + 1, z, c: spec.roof });
+      }
+    }
+    cells.push({ x: cx, y: 1, z: z0, c: spec.door });
+  });
+  return cells;
+}

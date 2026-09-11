@@ -18,5 +18,14 @@ module.exports = {
     'no-mixed-spaces-and-tabs': 'off',
     'no-unused-vars': ['warn', { varsIgnorePattern: '^React$' }],
     'react-hooks/exhaustive-deps': 'warn',
+    'react/no-unknown-property': ['error', {
+      ignore: [
+        'args', 'attach', 'position', 'rotation', 'scale', 'quaternion',
+        'castShadow', 'receiveShadow', 'frustumCulled', 'renderOrder', 'visible',
+        'material', 'geometry', 'map', 'side', 'transparent', 'depthWrite', 'emissive', 'emissiveIntensity', 'intensity',
+        'shadow-camera-bottom', 'shadow-camera-far', 'shadow-camera-left', 'shadow-camera-right', 'shadow-camera-top',
+        'shadow-mapSize-height', 'shadow-mapSize-width',
+      ],
+    }],
   },
 };

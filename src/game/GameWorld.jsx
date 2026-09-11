@@ -11,13 +11,13 @@ import { touchInput, setTouchInput } from './input';
 import { getOrCreateFarm, getFarmFor, plantCrop, harvestCrop, advanceFarmDay, grantSeeds } from '@/api/farm';
 import { CROPS, getOrCreateCharacter } from '@/api/integrations';
 import { avatarThemeFor } from './avatarTheme';
-import Wildlife, { farmBuildingCells } from './Wildlife';
+import Wildlife from './Wildlife';
 import ChallengeModal from './ChallengeModal';
 import ShopModal from './ShopModal';
 import {
   RIVER, BRIDGE, MATERIALS, START_MATERIALS, CHALLENGE_REWARD_MATERIALS,
   QUESTIONS, SUBJECT_STATIONS, SUBJECT_QUESTIONS, ARENA_ROUNDS, CITY, ARENA, NPC_DIALOGS, LANDMARKS,
-  SHOP_SPOT, TUTORIAL_STEPS,
+  SHOP_SPOT, TUTORIAL_STEPS, farmBuildingCells,
 } from './worldContent';
 
 const GRAVITY = -20;
@@ -122,8 +122,6 @@ const MOUNTAINS = [
   { p: [29, 30], r: 5, h: 7 },
   { p: [-30, 31], r: 4, h: 5 },
 ];
-
-const LAKE = { x0: 26, x1: 30, z0: 20, z1: 24 };
 
 const CITY_BUILDINGS = [
   { p: [0.5, 30], w: 7, d: 6, h: 5, wall: '#8B4513', roof: '#F5F5F5', label: 'Biblioteca das Fórmulas' },
@@ -232,7 +230,6 @@ function buildStaticWorld() {
   const r0 = -36, r1 = 36;
   for (let x = r0; x <= r1; x++) {
     for (let z = r0; z <= r1; z++) {
-      const inLake = x >= LAKE.x0 && x <= LAKE.x1 && z >= LAKE.z0 && z <= LAKE.z1;
       const onRoad = (Math.abs(x) <= 1 || Math.abs(z) <= 1) && !(x === 0 && z >= 6 && z <= 14);
       const inRiver = x >= RIVER.x0 && x <= RIVER.x1 && z >= RIVER.z0 && z <= RIVER.z1;
       const inCity = z >= CITY.pavement.z0 && z <= CITY.pavement.z1 && x >= CITY.pavement.x0 && x <= CITY.pavement.x1;
@@ -1602,7 +1599,7 @@ function InventoryModal({ blocks, materials, seeds, farm, onClose }) {
 }
 
 function MapModal({ playerPos, planks, cityUnlocked, onClose, arenaDone }) {
-  const w = 200, h = 160;
+  const h = 160;
   const toXY = (x, z) => ({ x: 100 + (x / 36) * 90, y: 80 - (z / 36) * 70 });
   const p = toXY(playerPos.x, playerPos.z);
   return (
@@ -1680,7 +1677,7 @@ const spawnFromHash = () => {
   try {
     const m = /[?&#]pos=(-?[\d.]+),(-?[\d.]+)/.exec(window.location.href);
     if (m) return { x: parseFloat(m[1]), z: parseFloat(m[2]) };
-  } catch (e) {}
+  } catch (e) { /* sem spawn hospedado */ }
   return null;
 };
 
@@ -1709,7 +1706,7 @@ const GameWorld = ({ onClose, seedColor }) => {
           checkpoint: parsed.checkpoint || null,
         };
       }
-    } catch (e) {}
+    } catch (e) { /* mundo não persistido */ }
     return { placed: {}, crops: {}, blocks: START_KIT, materials: { ...START_MATERIALS }, story: defaultStory(), checkpoint: null };
   };
   const [saved] = useState(parseSaved);
@@ -1742,7 +1739,7 @@ const GameWorld = ({ onClose, seedColor }) => {
   useEffect(() => {
     try {
       localStorage.setItem(storageKey, JSON.stringify({ placed, crops, blocks, materials, story, checkpoint }));
-    } catch (e) {}
+    } catch (e) { /* armazenamento indisponível */ }
   }, [placed, crops, blocks, materials, story, checkpoint, storageKey]);
 
   useEffect(() => {
@@ -1848,7 +1845,7 @@ const GameWorld = ({ onClose, seedColor }) => {
     pushToast('+🪵 Madeira +🪨 Pedra +🧱 Blocos');
   };
 
-  const grantStationCorrect = (station) => {
+  const grantStationCorrect = () => {
     grantChallenge();
     const pts = 4;
     setStory((s) => ({ ...s, points: (s.points || 0) + pts }));
@@ -2096,7 +2093,6 @@ const GameWorld = ({ onClose, seedColor }) => {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modal]);
 
   const selectedBlock = () => BLOCKS[(blockOffset + slot) % BLOCKS.length];

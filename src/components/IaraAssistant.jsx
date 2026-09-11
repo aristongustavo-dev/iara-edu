@@ -87,7 +87,6 @@ const KEYWORDS = {
   '3D': '3d',
   entrar: '3d',
   cenário: '3d',
-  cenário: '3d',
   game: '3d',
   jogo: '3d',
 };
