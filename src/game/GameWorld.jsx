@@ -164,6 +164,7 @@ const worldShared = {
   rot: 0,
   moving: false,
   cam: { yaw: 0, pitch: 0.59, dist: 8.2 },
+  iaraPos: null,
 };
 
 const makeOccSet = (placed, crops) => {
@@ -1023,8 +1024,10 @@ function Birds() {
   );
 }
 
-function IaraCompanion({ playerPosRef }) {
+function IaraCompanion({ playerPosRef, hasReward }) {
   const ref = useRef();
+  const coinRef = useRef();
+  const iaraPos = useRef(new THREE.Vector3());
   useFrame((state, delta) => {
     const g = ref.current;
     const p = playerPosRef?.current;
@@ -1041,6 +1044,12 @@ function IaraCompanion({ playerPosRef }) {
     const bobY = FEET_Y + Math.sin(state.clock.elapsedTime * 2.2) * 0.12;
     g.position.y += (bobY - g.position.y) * Math.min(1, delta * 6);
     g.rotation.y = Math.atan2(p.x - g.position.x, p.z - g.position.z);
+    worldShared.iaraPos = iaraPos.current.copy(g.position);
+    const coin = coinRef.current;
+    if (coin) {
+      coin.rotation.y = state.clock.elapsedTime * 2.4;
+      coin.position.y = 1.06 + Math.sin(state.clock.elapsedTime * 2.6) * 0.08;
+    }
   });
   return (
     <group ref={ref} position={[playerPosRef?.current?.x ?? 0, FEET_Y, playerPosRef?.current?.z ?? 8]}>
@@ -1060,10 +1069,12 @@ function IaraCompanion({ playerPosRef }) {
         <boxGeometry args={[0.07, 0.09, 0.02]} />
         <meshStandardMaterial color="#2B2B2B" />
       </mesh>
-      <mesh position={[0, 1.08, 0]}>
-        <boxGeometry args={[0.18, 0.18, 0.18]} />
-        <meshStandardMaterial color="#FFD700" emissive="#FFD700" emissiveIntensity={0.7} />
-      </mesh>
+      {hasReward && (
+        <mesh ref={coinRef} position={[0, 1.06, 0]}>
+          <cylinderGeometry args={[0.15, 0.15, 0.09, 20]} />
+          <meshStandardMaterial color="#FFD700" emissive="#FFD700" emissiveIntensity={0.55} />
+        </mesh>
+      )}
     </group>
   );
 }
@@ -1133,7 +1144,7 @@ function GameScene({ playerPosRef, placed, crops, mode, seedColor, onCollect, pr
 
       <CropLayer crops={Object.values(crops)} now={now} />
 
-      {iaraGuide && <IaraCompanion playerPosRef={playerPosRef} />}
+      {iaraGuide && <IaraCompanion playerPosRef={playerPosRef} hasReward={!progress?.iaraRewardClaimed} />}
       {NPCS.filter((n) => !iaraGuide || n.label !== 'IARA').map((n) => (
         <VoxelNPC key={n.label} position={[n.p[0], n.p[1]]} color={n.c} />
       ))}
@@ -1663,6 +1674,7 @@ function TutorialModal({ onClose }) {
 
 const defaultStory = () => ({
   iaraDialogSeen: false,
+  iaraRewardClaimed: false,
   planks: [false, false, false],
   cityUnlocked: false,
   arenaDone: false,
@@ -2024,7 +2036,10 @@ const GameWorld = ({ onClose, seedColor }) => {
     const cropAt = g && g.purpose === 'harvest' ? crops[toKey(g.x, g.y, g.z)] : null;
     if (cropAt) { doHarvest(); return; }
     const p = playerPosRef.current;
-    const targets = NPCS.map((n) => ({ x: n.p[0], z: n.p[1], kind: 'npc', label: n.label })).concat([
+    const realTargets = NPCS
+      .filter((n) => !(story.iaraDialogSeen && n.label === 'IARA'))
+      .map((n) => ({ x: n.p[0], z: n.p[1], kind: 'npc', label: n.label }));
+    const targets = realTargets.concat([
       { x: WORKSITE.x, z: WORKSITE.z, kind: 'site', label: WORKSITE.label },
       { x: SHOP_SPOT.x, z: SHOP_SPOT.z, kind: 'shop', label: 'Loja do Explorador' },
     ]).concat(SUBJECT_STATIONS.map((s) => ({ x: s.p[0], z: s.p[1], kind: 'station', label: s.label, station: s })));
@@ -2034,6 +2049,16 @@ const GameWorld = ({ onClose, seedColor }) => {
       const d = (p.x - t.x) ** 2 + (p.z - t.z) ** 2;
       if (d < bestD) { bestD = d; best = t; }
     });
+    // A IARA companheira (moeda acima da cabeça) NÃO pode roubar alvos reais:
+    // ela só é interagível quando nenhum NPC/estação/canteiro/loja está ao alcance.
+    if (!best && story.iaraDialogSeen) {
+      const iaraNpc = NPCS.find((n) => n.label === 'IARA');
+      const ip = worldShared.iaraPos || (iaraNpc ? { x: iaraNpc.p[0], z: iaraNpc.p[1] } : null);
+      if (ip) {
+        const d = (p.x - ip.x) ** 2 + (p.z - ip.z) ** 2;
+        if (d < bestD) best = { x: ip.x, z: ip.z, kind: 'npc', label: 'IARA' };
+      }
+    }
     if (!best) { pushToast('🤷 Nada para interagir aqui. Procure a IARA na praça ou uma estação.'); return; }
     if (best.kind === 'site') {
       if (story.planks.every(Boolean)) { pushToast('🌉 Ponte reconstruída! Atravesse para a cidade.'); return; }
@@ -2113,8 +2138,12 @@ const GameWorld = ({ onClose, seedColor }) => {
         const text = npc?.label === 'IARA' && story.planks.every(Boolean)
           ? 'Incrível! A ponte está reconstruída. A Cidade da Matemática agora está aberta para você! 🎉'
           : (NPC_DIALOGS[npc?.label] || 'Olá! Explore a Fazenda do Conhecimento.');
-        const action =
-          npc?.label === 'IARA' || npc?.label === 'Professor' || npc?.label === 'CityTeacher'
+        const isIara = npc?.label === 'IARA';
+        const action = isIara
+          ? (story.iaraRewardClaimed
+              ? null
+              : { label: 'Aceitar Desafio 🤔', open: 'challenge', claimCoin: true })
+          : npc?.label === 'Professor' || npc?.label === 'CityTeacher'
             ? { label: 'Aceitar Desafio 🤔', open: 'challenge' }
             : npc?.label === 'ArenaReferee'
               ? { label: '🏆 Iniciar Arena', open: 'arena' }
@@ -2129,7 +2158,7 @@ const GameWorld = ({ onClose, seedColor }) => {
             text={text}
             onClose={() => setModal(null)}
             actionLabel={action?.label}
-            onAction={() => setModal(action ? { type: action.open, title: `Desafio — ${npc.label}` } : null)}
+            onAction={() => setModal(action ? { type: action.open, title: `Desafio — ${npc.label}`, fromIara: action.claimCoin === true } : null)}
           />
         );
       }
@@ -2152,7 +2181,13 @@ const GameWorld = ({ onClose, seedColor }) => {
             title={modal.title || 'Desafio Matemático'}
             questions={makeQuestions(null, 3)}
             onCorrect={grantChallenge}
-            onDone={() => setModal(null)}
+            onDone={() => {
+              if (modal.fromIara && !story.iaraRewardClaimed) {
+                setStory((s) => ({ ...s, iaraRewardClaimed: true }));
+                pushToast('🪙 Recompensa da IARA coletada!');
+              }
+              setModal(null);
+            }}
           />
         );
       }
