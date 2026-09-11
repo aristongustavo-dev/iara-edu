@@ -8,12 +8,16 @@ import GameErrorBoundary from './components/GameErrorBoundary';
 import { awardReward } from '@/lib/gamification';
 import { useAuth } from '@/lib/AuthContext';
 import { touchInput, setTouchInput } from './input';
-import { getOrCreateFarm, getFarmFor, plantCrop, harvestCrop, advanceFarmDay } from '@/api/farm';
+import { getOrCreateFarm, getFarmFor, plantCrop, harvestCrop, advanceFarmDay, grantSeeds } from '@/api/farm';
 import { CROPS, getOrCreateCharacter } from '@/api/integrations';
 import { avatarThemeFor } from './avatarTheme';
+import Wildlife, { farmBuildingCells } from './Wildlife';
+import ChallengeModal from './ChallengeModal';
+import ShopModal from './ShopModal';
 import {
   RIVER, BRIDGE, MATERIALS, START_MATERIALS, CHALLENGE_REWARD_MATERIALS,
-  QUESTIONS, ARENA_ROUNDS, CITY, ARENA, NPC_DIALOGS, LANDMARKS,
+  QUESTIONS, SUBJECT_STATIONS, SUBJECT_QUESTIONS, ARENA_ROUNDS, CITY, ARENA, NPC_DIALOGS, LANDMARKS,
+  SHOP_SPOT, TUTORIAL_STEPS,
 } from './worldContent';
 
 const GRAVITY = -20;
@@ -147,6 +151,11 @@ const NPCS = [
   { p: [15, 12], c: '#E67E22', label: 'Mercador' },
   { p: [0.5, 27.5], c: '#E91E63', label: 'CityTeacher' },
   { p: [ARENA.npc.x, ARENA.npc.z], c: ARENA.npc.c, label: 'ArenaReferee' },
+  { p: [4, 4], c: '#16A085', label: 'Guardia' },
+  { p: [6, -8], c: '#8E44AD', label: 'Jardineira' },
+  { p: [5, 18], c: '#2C3E50', label: 'Cartografo' },
+  { p: [16, 19], c: '#D35400', label: 'Musicista' },
+  { p: [1, 10], c: '#27AE60', label: 'Guia' },
 ];
 
 const WORKSITE = { x: 0, z: 17, label: 'Ponte', name: 'Canteiro da Ponte' };
@@ -365,7 +374,7 @@ function buildStaticWorld() {
 
 const STATIC_WORLD = buildStaticWorld();
 
-function buildMultiWorld({ placed, crops, progress }) {
+function buildMultiWorld({ placed, crops, progress, farm }) {
   const occKeys = new Set(STATIC_WORLD.occKeys);
   const solidKeys = new Set(STATIC_WORLD.solidKeys);
   const groundTop = new Map(STATIC_WORLD.groundTop);
@@ -421,8 +430,14 @@ function buildMultiWorld({ placed, crops, progress }) {
     x: p.x, y: p.y, z: p.z, c: (BLOCKS.find((b) => b.id === p.id) || { c: C.dirt }).c,
   }));
 
+  const farmCells = farmBuildingCells(farm || null);
+  farmCells.forEach((c) => {
+    occKeys.add(toKey(c.x, c.y, c.z));
+    solidKeys.add(toKey(c.x, c.y, c.z));
+  });
+
   return {
-    cells: staticCells.concat(railCells).concat(gateCells).concat(plankCells).concat(placedCells),
+    cells: staticCells.concat(railCells).concat(gateCells).concat(plankCells).concat(placedCells).concat(farmCells),
     solidKeys,
     occKeys,
     groundTop,
@@ -856,6 +871,54 @@ function LandmarkLabels() {
   ));
 }
 
+function StationMarker({ s }) {
+  const ref = useRef();
+  useFrame((state) => {
+    if (ref.current) {
+      ref.current.position.y = 1.55 + Math.sin(state.clock.elapsedTime * 2 + s.p[0] * 0.3) * 0.12;
+    }
+  });
+  return (
+    <group ref={ref} position={[s.p[0], 1, s.p[1]]}>
+      <mesh position={[0, 0.8, 0]} castShadow>
+        <boxGeometry args={[0.8, 0.8, 0.8]} />
+        <meshStandardMaterial color={s.color} emissive={s.color} emissiveIntensity={0.5} />
+      </mesh>
+      <mesh position={[0, 0.1, 0]} castShadow>
+        <boxGeometry args={[0.2, 1, 0.2]} />
+        <meshStandardMaterial color="#7A5230" />
+      </mesh>
+      <LabelSprite text={`${s.emoji} ${s.label}`} color={s.color} position={[0, 2.6, 0]} />
+    </group>
+  );
+}
+
+function StationMarkers({ stations }) {
+  return stations.map((s) => <StationMarker key={s.id} s={s} />);
+}
+
+function ShopMarker() {
+  const ref = useRef();
+  useFrame((state) => {
+    if (ref.current) {
+      ref.current.position.y = 1.55 + Math.sin(state.clock.elapsedTime * 2.2) * 0.14;
+    }
+  });
+  return (
+    <group ref={ref} position={[SHOP_SPOT.x, 1, SHOP_SPOT.z]}>
+      <mesh position={[0, 0.8, 0]} castShadow>
+        <boxGeometry args={[0.9, 0.9, 0.9]} />
+        <meshStandardMaterial color="#FFD700" emissive="#FFD700" emissiveIntensity={0.55} />
+      </mesh>
+      <mesh position={[0, 0, 0]} castShadow>
+        <boxGeometry args={[0.3, 0.6, 0.3]} />
+        <meshStandardMaterial color="#7A5230" />
+      </mesh>
+      <LabelSprite text="🛒 Loja do Explorador" color="#FFD700" position={[0, 2.4, 0]} />
+    </group>
+  );
+}
+
 function Clouds() {
   const refs = useRef([]);
   const INIT = [
@@ -1008,7 +1071,7 @@ function IaraCompanion({ playerPosRef }) {
   );
 }
 
-function GameScene({ playerPosRef, placed, crops, mode, seedColor, onCollect, progress, avatar, iaraGuide, spawnPos }) {
+function GameScene({ playerPosRef, placed, crops, mode, seedColor, onCollect, progress, avatar, iaraGuide, spawnPos, farm }) {
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
@@ -1016,7 +1079,7 @@ function GameScene({ playerPosRef, placed, crops, mode, seedColor, onCollect, pr
     return () => clearInterval(id);
   }, []);
 
-  const world = useMemo(() => buildMultiWorld({ placed, crops, progress }), [placed, crops, progress]);
+  const world = useMemo(() => buildMultiWorld({ placed, crops, progress, farm }), [placed, crops, progress, farm]);
   const occSet = world.occKeys;
   const collisionSet = world.solidKeys;
 
@@ -1079,6 +1142,10 @@ function GameScene({ playerPosRef, placed, crops, mode, seedColor, onCollect, pr
       ))}
 
       <Collectibles items={COLLECTIBLES} playerRef={playerPosRef} onCollect={onCollect} />
+
+      <Wildlife farm={farm} />
+      <StationMarkers stations={SUBJECT_STATIONS} />
+      <ShopMarker />
 
       <Ghost />
 
@@ -1209,15 +1276,18 @@ function VoxelHUD({
   );
 }
 
-const makeQuestions = (cat, n) => {
-  const pool = cat ? QUESTIONS.filter((q) => q.cat === cat) : [...QUESTIONS];
-  return [...pool]
+const shufflePick = (pool, n) =>
+  [...pool]
     .sort(() => Math.random() - 0.5)
     .slice(0, n)
     .map((q) => {
       const opts = q.opts.map((o, i) => ({ o, i })).sort(() => Math.random() - 0.5);
       return { q: q.q, opts: opts.map((s) => s.o), a: opts.findIndex((s) => s.i === q.a) };
     });
+
+const makeQuestions = (cat, n) => {
+  const pool = cat ? QUESTIONS.filter((q) => q.cat === cat) : [...QUESTIONS];
+  return shufflePick(pool, n);
 };
 
 const Overlay = ({ title, onClose, children, wide }) => (
@@ -1564,12 +1634,46 @@ const LoadingScreen = () => (
   </div>
 );
 
+function TutorialModal({ onClose }) {
+  const [step, setStep] = useState(0);
+  const s = TUTORIAL_STEPS[step];
+  if (!s) return null;
+  return (
+    <Overlay title={`🧭 Guia Rápido — ${step + 1}/${TUTORIAL_STEPS.length}`} onClose={onClose}>
+      <div className="text-center space-y-3">
+        <p className="text-5xl">{s.icon}</p>
+        <p className="font-bold text-gray-800">{s.title}</p>
+        <p className="text-sm text-gray-600 leading-relaxed">{s.body}</p>
+        <div className="flex justify-center gap-2 items-center">
+          <button
+            disabled={step === 0}
+            onClick={() => setStep(step - 1)}
+            className="px-3 py-1.5 rounded-lg bg-gray-200 text-gray-700 text-xs font-bold disabled:opacity-40"
+          >
+            ←
+          </button>
+          <button
+            onClick={() => (step === TUTORIAL_STEPS.length - 1 ? onClose() : setStep(step + 1))}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold ${step === TUTORIAL_STEPS.length - 1 ? 'bg-green-500 text-white' : 'bg-indigo-600 text-white'}`}
+          >
+            {step === TUTORIAL_STEPS.length - 1 ? 'Começar 🚀' : 'Avançar →'}
+          </button>
+        </div>
+      </div>
+    </Overlay>
+  );
+}
+
 const defaultStory = () => ({
   iaraDialogSeen: false,
   planks: [false, false, false],
   cityUnlocked: false,
   arenaDone: false,
   arenaBest: 0,
+  points: 0,
+  subjects: {},
+  tutorialSeen: false,
+  enciclopedico: false,
 });
 
 const spawnFromHash = () => {
@@ -1630,6 +1734,8 @@ const GameWorld = ({ onClose, seedColor }) => {
   const [story, setStory] = useState(saved.story);
 
   const [modal, setModal] = useState(null);
+  const modalRef = useRef(null);
+  modalRef.current = modal;
   const [dialogNpc, setDialogNpc] = useState(null);
   const worldRef = useRef(null);
 
@@ -1671,8 +1777,8 @@ const GameWorld = ({ onClose, seedColor }) => {
   }, [user]);
 
   useEffect(() => {
-    worldRef.current = buildMultiWorld({ placed, crops, progress: story });
-  }, [placed, crops, story]);
+    worldRef.current = buildMultiWorld({ placed, crops, progress: story, farm });
+  }, [placed, crops, story, farm]);
 
   useEffect(() => {
     if (!loaded || story.iaraDialogSeen || modal) return;
@@ -1684,6 +1790,16 @@ const GameWorld = ({ onClose, seedColor }) => {
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded, story.iaraDialogSeen]);
+
+  useEffect(() => {
+    if (!loaded || !story.iaraDialogSeen || story.tutorialSeen || modal) return;
+    const t = setTimeout(() => {
+      setModal({ type: 'tutorial' });
+      setStory((s) => ({ ...s, tutorialSeen: true }));
+    }, 1400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, story.iaraDialogSeen, story.tutorialSeen]);
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -1730,6 +1846,55 @@ const GameWorld = ({ onClose, seedColor }) => {
       blocos: m.blocos + CHALLENGE_REWARD_MATERIALS.blocos,
     }));
     pushToast('+🪵 Madeira +🪨 Pedra +🧱 Blocos');
+  };
+
+  const grantStationCorrect = (station) => {
+    grantChallenge();
+    const pts = 4;
+    setStory((s) => ({ ...s, points: (s.points || 0) + pts }));
+    pushToast(`💎 +${pts} Pontos de Exploração!`);
+  };
+
+  const finishStationChallenge = (station, correctCount) => {
+    if (station && correctCount >= 3) {
+      const subs = { ...(story.subjects || {}), [station.id]: true };
+      const doneCount = Object.values(subs).filter(Boolean).length;
+      pushToast(`✅ Estação de ${station.subject} concluída! 💎`);
+      if (doneCount >= SUBJECT_STATIONS.length && !story.enciclopedico) {
+        pushToast('🏅 MEDALHA ENCICLOPÉDICO! Você domina as 9 matérias da BNCC!');
+        if (userEmail) {
+          const r = awardReward(userEmail, 'MISSION_COMPLETE');
+          setXp((p) => p + (r?.xpGain || 0));
+          setCoins((p) => p + (r?.coinGain || 0));
+        }
+        setStory((s) => ({ ...s, subjects: subs, enciclopedico: true }));
+      } else {
+        setStory((s) => ({ ...s, subjects: subs }));
+      }
+    }
+    setModal(null);
+  };
+
+  const doRedeem = (item) => {
+    const have = story.points || 0;
+    if (have < item.points) { pushToast('Pontos de Exploração insuficientes.'); return; }
+    if (item.material) {
+      setStory((s) => ({ ...s, points: have - item.points }));
+      setMaterials((m) => ({ ...m, [item.material]: (m[item.material] || 0) + (item.qty || 0) }));
+      pushToast(`🧰 ${item.name} resgatado!`);
+      return;
+    }
+    if (item.seed) {
+      if (!farm) { pushToast('Entre para usar a fazenda.'); return; }
+      const res = grantSeeds(farm, item.seed, item.qty);
+      if (!res.ok) { pushToast(res.msg); return; }
+      setStory((s) => ({ ...s, points: have - item.points }));
+      setFarm(res.farm);
+      pushToast(`🌱 ${item.name} adicionadas à fazenda!`);
+      return;
+    }
+    setStory((s) => ({ ...s, points: have - item.points }));
+    pushToast(item.decor === 'crown' ? '👑 Você é o Rei do Saber!' : `${item.icon} ${item.name}! ✨`);
   };
 
   const handleCollect = (type) => {
@@ -1857,24 +2022,30 @@ const GameWorld = ({ onClose, seedColor }) => {
   };
 
   const doInteract = () => {
-    if (modal) return;
+    if (modalRef.current) return;
     const g = frontNow();
     const cropAt = g && g.purpose === 'harvest' ? crops[toKey(g.x, g.y, g.z)] : null;
     if (cropAt) { doHarvest(); return; }
     const p = playerPosRef.current;
     const targets = NPCS.map((n) => ({ x: n.p[0], z: n.p[1], kind: 'npc', label: n.label })).concat([
       { x: WORKSITE.x, z: WORKSITE.z, kind: 'site', label: WORKSITE.label },
-    ]);
+      { x: SHOP_SPOT.x, z: SHOP_SPOT.z, kind: 'shop', label: 'Loja do Explorador' },
+    ]).concat(SUBJECT_STATIONS.map((s) => ({ x: s.p[0], z: s.p[1], kind: 'station', label: s.label, station: s })));
     let best = null;
     let bestD = 3.6 * 3.6;
     targets.forEach((t) => {
       const d = (p.x - t.x) ** 2 + (p.z - t.z) ** 2;
       if (d < bestD) { bestD = d; best = t; }
     });
-    if (!best) { pushToast('🤷 Nada para interagir aqui. Procure a IARA na praça.'); return; }
+    if (!best) { pushToast('🤷 Nada para interagir aqui. Procure a IARA na praça ou uma estação.'); return; }
     if (best.kind === 'site') {
       if (story.planks.every(Boolean)) { pushToast('🌉 Ponte reconstruída! Atravesse para a cidade.'); return; }
       setModal({ type: 'bridge' });
+      return;
+    }
+    if (best.kind === 'shop') { setModal({ type: 'shop' }); return; }
+    if (best.kind === 'station') {
+      setModal({ type: 'challenge', station: best.station, title: best.station.label });
       return;
     }
     const npc = NPCS.find((n) => n.label === best.label);
@@ -1900,6 +2071,11 @@ const GameWorld = ({ onClose, seedColor }) => {
         if (code === 'Tab' || code === 'KeyM' || code === 'KeyQ' || code === 'Escape') {
           e.preventDefault();
           setModal(null);
+        } else if (code === 'KeyE' && modal.type === 'tutorial') {
+          e.preventDefault();
+          modalRef.current = null;
+          setModal(null);
+          handleInteractRef.current();
         }
         return;
       }
@@ -1946,7 +2122,11 @@ const GameWorld = ({ onClose, seedColor }) => {
             ? { label: 'Aceitar Desafio 🤔', open: 'challenge' }
             : npc?.label === 'ArenaReferee'
               ? { label: '🏆 Iniciar Arena', open: 'arena' }
-              : null;
+              : npc?.label === 'Mercador'
+                ? { label: '🛒 Abrir Loja', open: 'shop' }
+                : npc?.label === 'Guia'
+                  ? { label: '🧭 Ver Guia Rápido', open: 'tutorial' }
+                  : null;
         return (
           <DialogModal
             npc={npc}
@@ -1957,7 +2137,20 @@ const GameWorld = ({ onClose, seedColor }) => {
           />
         );
       }
-      case 'challenge':
+      case 'challenge': {
+        const station = modal.station;
+        if (station) {
+          const pool = SUBJECT_QUESTIONS[station.id] || QUESTIONS;
+          return (
+            <ChallengeModal
+              subject={station}
+              questions={shufflePick(pool, 3)}
+              points={story.points}
+              onCorrect={() => grantStationCorrect(station)}
+              onDone={(correct) => finishStationChallenge(station, correct)}
+            />
+          );
+        }
         return (
           <QuizModal
             title={modal.title || 'Desafio Matemático'}
@@ -1966,6 +2159,11 @@ const GameWorld = ({ onClose, seedColor }) => {
             onDone={() => setModal(null)}
           />
         );
+      }
+      case 'shop':
+        return <ShopModal points={story.points} onRedeem={doRedeem} onClose={() => setModal(null)} />;
+      case 'tutorial':
+        return <TutorialModal onClose={() => setModal(null)} />;
       case 'bridge':
         return (
           <BridgeModal
@@ -2017,6 +2215,19 @@ const GameWorld = ({ onClose, seedColor }) => {
       >
         ← Sair do Mundo 3D
       </button>
+
+      <div className="absolute top-4 right-4 z-[95] flex items-center gap-2">
+        <div className="bg-black/50 backdrop-blur-sm text-amber-300 px-3 py-2 rounded-xl font-bold text-xs flex items-center gap-1" title="Pontos de Exploração">
+          💎 {story.points || 0}
+        </div>
+        <button
+          onClick={() => setModal({ type: 'tutorial' })}
+          className="bg-black/50 hover:bg-black/70 text-white w-9 h-9 rounded-xl font-bold backdrop-blur-sm transition-colors"
+          title="Guia rápido"
+        >
+          ❓
+        </button>
+      </div>
 
       <HUD
         xp={xp}
@@ -2110,6 +2321,7 @@ const GameWorld = ({ onClose, seedColor }) => {
             spawnPos={spawnPos}
             onCollect={handleCollect}
             progress={story}
+            farm={farm}
           />
         </Canvas>
       </GameErrorBoundary>

@@ -257,6 +257,18 @@ export const getRankings = (user) => {
   return { escola, turma, disciplina, mes };
 };
 
+export const grantSeeds = (farm, seedId, qty = 1) => {
+  if (!farm) return { ok: false, msg: 'Fazenda não carregada' };
+  const sementes = { ...(farm?.inventories?.sementes || {}) };
+  sementes[seedId] = (sementes[seedId] || 0) + qty;
+  const patch = {
+    inventories: { ...(farm?.inventories || {}), sementes },
+    updated_at: todayKey(),
+  };
+  saveFarm({ ...farm, ...patch });
+  return { ok: true, msg: `+${qty} sementes de ${seedId}!`, farm: getFarmFor(farm.student_email) };
+};
+
 export const advanceFarmDay = (farm) => {
   // reset progresso diário
   const patch = {
