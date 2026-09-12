@@ -1,5 +1,6 @@
 import { uid } from '@/lib/utils';
 import { pullFromCloud, scheduleCloudSync } from './cloud';
+import { DEMO_ACCOUNTS } from './demoAccounts';
 
 const STORAGE_KEY = 'iara_edu_db_v2';
 
@@ -574,6 +575,31 @@ const emptyDb = () => ({
   notices: [], attendances: [], conversations: [], reports: [], farms: [], events: [],
 });
 
+// Garante que TODAS as contas de demonstração existam e entrem sem senha,
+// mesmo quando o usuário já tem um cache sincronizado vindo da nuvem.
+const ensureDemoUsers = (d) => {
+  if (!d.users) d.users = [];
+  const hasCls6a = Array.isArray(d.classes) && d.classes.some((c) => c.id === 'cls_6a');
+  DEMO_ACCOUNTS.forEach((demo) => {
+    const cur = d.users.find((u) => u.email === demo.email);
+    if (cur) {
+      delete cur.password_hash;
+      if (!cur.role) cur.role = demo.role;
+    } else {
+      d.users.push({
+        id: demo.id,
+        role: demo.role,
+        name: demo.name,
+        email: demo.email,
+        school_name: 'Escola Municipal Sonho Dourado',
+        grade_level: demo.role === 'aluno' ? '6_ano_fund' : '',
+        class_id: demo.role === 'aluno' && hasCls6a ? 'cls_6a' : '',
+        xp: 0, level: 1, badges: [], total_activities: 0, total_correct: 0, streak_days: 0,
+      });
+    }
+  });
+};
+
 let pulledCloud = false;
 const load = () => {
   let db;
@@ -595,12 +621,15 @@ const load = () => {
     } catch (e) {
       // ignore
     }
+  } else {
+    ensureDemoUsers(db);
   }
   if (!pulledCloud) {
     pulledCloud = true;
     pullFromCloud(db).then((merged) => {
+      if (merged) ensureDemoUsers(merged);
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(merged || db));
       } catch (e) {
         // ignore
       }

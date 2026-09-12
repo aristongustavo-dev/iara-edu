@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { getUserByEmail, getOrCreateCharacter, registerStudent, hashPassword } from '@/api/integrations';
 import { getOrCreateFarm } from '@/api/farm';
+import { isDemoEmail } from '@/api/demoAccounts';
 import { syncUsersAll, pushUsers, pullUsers } from '@/lib/sync';
 
 const AuthContext = createContext();
@@ -40,7 +41,8 @@ export const AuthProvider = ({ children }) => {
   const clearAuthError = () => setAuthError(null);
 
   const completeLogin = (found, password) => {
-    if (found.password_hash) {
+    // contas de demonstração entram sempre sem senha
+    if (found.password_hash && !isDemoEmail(found.email)) {
       const pw = String(password || '');
       if (!pw || hashPassword(pw) !== found.password_hash) {
         setUser(null);

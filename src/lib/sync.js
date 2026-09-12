@@ -1,4 +1,5 @@
 import { db } from '@/api/db';
+import { isDemoEmail } from '@/api/demoAccounts';
 
 const apiBase = (() => {
   try {
@@ -37,12 +38,18 @@ const persistUsers = (users) => {
 const normalize = (users) =>
   (users || []).map((u) => (u.updated_at ? u : { ...u, updated_at: Date.now() }));
 
+// contas de demonstração são sempre sem senha, mesmo após merges com a nuvem
+const sanitizeDemo = (users) => (users || []).forEach((u) => {
+  if (isDemoEmail(u.email)) delete u.password_hash;
+});
+
 export const pullUsers = async () => {
   try {
     const res = await fetch(endpoint('db'), { method: 'GET' });
     if (!res.ok) return null;
     const remote = await res.json();
     const merged = normalize(mergeUsers(db.get('users'), remote.users || []));
+    sanitizeDemo(merged);
     persistUsers(merged);
     return merged;
   } catch (e) {
@@ -53,6 +60,7 @@ export const pullUsers = async () => {
 export const pushUsers = async () => {
   try {
     const local = normalize(db.get('users'));
+    sanitizeDemo(local);
     const res = await fetch(endpoint('sync'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

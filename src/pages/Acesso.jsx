@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '@/lib/AuthContext';
-import { getAllUsers } from '@/api/integrations';
+import { DEMO_ACCOUNTS } from '@/api/demoAccounts';
 import { roleLabel, gradeLabel } from '@/lib/utils';
 import { gradeLevels } from '@/api/subjects';
 import { Button } from '@/components/ui/button';
@@ -16,7 +16,7 @@ const Acesso = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [form, setForm] = useState({ name: '', email: '', password: '', confirm: '', grade: '6_ano_fund' });
-  const demoUsers = getAllUsers();
+  const demoUsers = DEMO_ACCOUNTS;
 
   const doLogin = (mail) => {
     if (!mail) return;
