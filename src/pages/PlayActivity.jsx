@@ -13,6 +13,7 @@ import { subjectLabel, difficultyLabel, gradeLabel, gameModeLabel } from '@/lib/
 import MemoryGame from '@/components/games/MemoryGame';
 import HangmanGame from '@/components/games/HangmanGame';
 import WordSearchGame from '@/components/games/WordSearchGame';
+import Celebration from '@/components/ui/Celebration';
 
 const GAME_MODES = {
   jogo_memoria: MemoryGame,
@@ -184,9 +185,8 @@ const PlayActivity = () => {
     const great = score >= 70;
     return (
       <div className="max-w-2xl mx-auto">
-        {score === 100 && <div className="confetti-layer" />}
+        <Celebration score={score} xp={result?.xpEarned || 0} coins={Math.min(10, result?.attempt?.correct_count * 2) || 0} />
         <div className="card-playful p-8 text-center space-y-5 animate-pop-in">
-          <div className="text-6xl">{score === 100 ? '🏆' : great ? '🎉' : '💪'}</div>
           <h1 className="text-3xl font-display font-bold">
             {score === 100 ? 'Perfeito!' : great ? 'Mandou bem!' : 'Continue praticando!'}
           </h1>

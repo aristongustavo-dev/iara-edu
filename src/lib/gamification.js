@@ -183,6 +183,22 @@ export function checkAndUpdateStreak(email) {
 }
 
 // ─── MISSIONS ────────────────────────────────────────────────────
+const missionRow = (email) => {
+  const rows = db.get('mission_progress') || [];
+  const row = rows.find((r) => r.email === email) || null;
+  if (row) {
+    if (!row.daily) row.daily = {};
+    if (!row.weekly) row.weekly = {};
+  }
+  return row;
+};
+
+const ensureMissionRow = (email) => {
+  const existing = missionRow(email);
+  if (existing) return existing;
+  return db.insert('mission_progress', { email, daily: {}, weekly: {} });
+};
+
 const DAILY_MISSION_DEFS = [
   { id: 'daily_activity', title: 'Complete uma atividade', desc: 'Resolva qualquer atividade disponível', icon: '📝', xpReward: 25, coinReward: 15, target: 1, type: 'daily', trackField: 'activities_today' },
   { id: 'daily_correct', title: 'Acerte 3 questões', desc: 'Acerte no mínimo 3 questões em atividades', icon: '✅', xpReward: 20, coinReward: 10, target: 3, type: 'daily', trackField: 'correct_today' },
@@ -205,14 +221,15 @@ const STORY_MISSIONS = [
 ];
 
 export function getDailyMissions(email) {
-  const progress = db.get('mission_progress') || {};
-  const userProg = progress[email] || {};
+  const userRow = missionRow(email);
+  const userProg = userRow || { daily: {} };
   const today = new Date().toISOString().slice(0, 10);
 
   // Reset daily if new day
   if (userProg.last_daily_reset !== today) {
-    userProg.daily = {};
+    userProg.daily = userProg.daily || {};
     userProg.last_daily_reset = today;
+    if (userRow) db.update('mission_progress', userRow.id, userProg);
   }
 
   return DAILY_MISSION_DEFS.map((m) => ({
@@ -224,16 +241,17 @@ export function getDailyMissions(email) {
 }
 
 export function getWeeklyMissions(email) {
-  const progress = db.get('mission_progress') || {};
-  const userProg = progress[email] || {};
+  const userRow = missionRow(email);
+  const userProg = userRow || { weekly: {} };
   const now = new Date();
   const weekStart = new Date(now);
   weekStart.setDate(now.getDate() - now.getDay());
   const weekKey = weekStart.toISOString().slice(0, 10);
 
   if (userProg.last_weekly_reset !== weekKey) {
-    userProg.weekly = {};
+    userProg.weekly = userProg.weekly || {};
     userProg.last_weekly_reset = weekKey;
+    if (userRow) db.update('mission_progress', userRow.id, userProg);
   }
 
   return WEEKLY_MISSION_DEFS.map((m) => ({
@@ -268,29 +286,28 @@ export function getStoryMissions(email) {
 }
 
 export function trackMissionProgress(email, field, amount = 1) {
-  const progress = db.get('mission_progress') || {};
-  const userProg = progress[email] || {};
+  const row = ensureMissionRow(email);
 
-  if (!userProg.daily) userProg.daily = {};
-  if (!userProg.weekly) userProg.weekly = {};
+  if (!row.daily) row.daily = {};
+  if (!row.weekly) row.weekly = {};
 
   // Track daily field
   if (field === 'activities_today' || field === 'correct_today' || field === 'harvests_today') {
-    userProg.daily[field] = (userProg.daily[field] || 0) + amount;
+    row.daily[field] = (row.daily[field] || 0) + amount;
   }
 
   // Track weekly field
   if (field === 'activities_week' || field === 'perfect_week') {
-    userProg.weekly[field] = (userProg.weekly[field] || 0) + amount;
+    row.weekly[field] = (row.weekly[field] || 0) + amount;
   }
 
-  progress[email] = userProg;
-  db.update('mission_progress', email, userProg);
+  db.update('mission_progress', row.id, row);
 }
 
 export function claimMissionReward(email, missionId) {
-  const progress = db.get('mission_progress') || {};
-  const userProg = progress[email] || {};
+  const row = missionRow(email);
+  if (!row) return null;
+  const userProg = row;
   const allMissions = [...getDailyMissions(email), ...getWeeklyMissions(email)];
   const mission = allMissions.find((m) => m.id === missionId);
 
@@ -302,8 +319,7 @@ export function claimMissionReward(email, missionId) {
 
   if (!userProg[period]) userProg[period] = {};
   userProg[period][claimKey] = true;
-  progress[email] = userProg;
-  db.update('mission_progress', email, userProg);
+  db.update('mission_progress', row.id, userProg);
 
   // Award rewards
   const user = getUserByEmail(email);

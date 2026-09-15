@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { getUserByEmail, getOrCreateCharacter, registerStudent, hashPassword } from '@/api/integrations';
+import { getUserByEmail, getOrCreateCharacter, registerStudent, hashPassword, resetDemoProgress } from '@/api/integrations';
 import { getOrCreateFarm } from '@/api/farm';
 import { isDemoEmail } from '@/api/demoAccounts';
 import { syncUsersAll, pushUsers, pullUsers } from '@/lib/sync';
@@ -58,6 +58,8 @@ export const AuthProvider = ({ children }) => {
     setAuthError(null);
     setUser(found);
     if (found.role === 'aluno' || found.role === 'pai') {
+      // contas de demonstração sempre recomeçam do nível inicial
+      if (isDemoEmail(found.email)) resetDemoProgress(found.email);
       setCharacter(getOrCreateCharacter(found));
       if (found.role === 'aluno') getOrCreateFarm(found);
     }

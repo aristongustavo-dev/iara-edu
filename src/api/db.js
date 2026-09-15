@@ -573,6 +573,7 @@ const buildSeed = () => {
 const emptyDb = () => ({
   users: [], classes: [], activities: [], attempts: [], characters: [], groups: [],
   notices: [], attendances: [], conversations: [], reports: [], farms: [], events: [],
+  mission_progress: [],
 });
 
 // Garante que TODAS as contas de demonstração existam e entrem sem senha,
@@ -609,6 +610,7 @@ const load = () => {
       const parsed = JSON.parse(raw);
       if (!parsed.farms) parsed.farms = [];
       if (!parsed.events) parsed.events = [];
+      if (!parsed.mission_progress) parsed.mission_progress = [];
       db = parsed;
     }
   } catch (e) {

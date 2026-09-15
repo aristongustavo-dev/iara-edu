@@ -1,4 +1,5 @@
 import { db } from './db';
+import { isDemoEmail } from './demoAccounts';
 
 export const now = () => new Date().toISOString();
 
@@ -125,6 +126,25 @@ export const getClassById = (id) => db.findById('classes', id);
 
 export const getClassForUser = (user) =>
   user?.class_id ? db.findById('classes', user.class_id) : null;
+
+// Contas de demonstração sempre voltam ao estado de primeiro acesso (reset no login)
+export const resetDemoProgress = (email) => {
+  if (!email || !isDemoEmail(email)) return;
+  db.get('users', { email }).forEach((u) =>
+    db.update('users', u.id, {
+      xp: 0, level: 1, badges: [], total_activities: 0, total_correct: 0, streak_days: 0,
+    }),
+  );
+  db.get('characters', { student_email: email }).forEach((c) => db.remove('characters', c.id));
+  db.get('farms', { student_email: email }).forEach((f) => db.remove('farms', f.id));
+  db.get('attempts', { student_email: email }).forEach((a) => db.remove('attempts', a.id));
+  (db.get('mission_progress') || []).filter((r) => r.email === email).forEach((r) => db.remove('mission_progress', r.id));
+  try {
+    localStorage.removeItem(`iara_voxel_world_${email}`);
+  } catch (e) {
+    // ignore
+  }
+};
 
 export const getOrCreateCharacter = (student) => {
   if (!student) return null;

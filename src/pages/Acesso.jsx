@@ -16,6 +16,7 @@ const Acesso = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [form, setForm] = useState({ name: '', email: '', password: '', confirm: '', grade: '6_ano_fund' });
+  const [formError, setFormError] = useState('');
   const demoUsers = DEMO_ACCOUNTS;
 
   const doLogin = (mail) => {
@@ -26,9 +27,10 @@ const Acesso = () => {
   const doRegister = () => {
     if (form.password !== form.confirm) {
       clearAuthError();
-      alert('As senhas não coincidem. Confira e tente de novo!');
+      setFormError('As senhas não coincidem. Confira e tente de novo!');
       return;
     }
+    setFormError('');
     registerStudentAccount({
       name: form.name, email: form.email, password: form.password, grade_level: form.grade,
     });
@@ -114,7 +116,7 @@ const Acesso = () => {
                 <User size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={form.name}
-                  onChange={(e) => { setForm({ ...form, name: e.target.value }); clearAuthError(); }}
+                  onChange={(e) => { setForm({ ...form, name: e.target.value }); clearAuthError(); setFormError(''); }}
                   placeholder="Seu nome completo"
                   className="pl-10 h-12"
                 />
@@ -124,7 +126,7 @@ const Acesso = () => {
                 <Input
                   type="email"
                   value={form.email}
-                  onChange={(e) => { setForm({ ...form, email: e.target.value }); clearAuthError(); }}
+                  onChange={(e) => { setForm({ ...form, email: e.target.value }); clearAuthError(); setFormError(''); }}
                   placeholder="Seu e-mail (ex.: joao.souza@email.com)"
                   className="pl-10 h-12"
                 />
@@ -135,8 +137,8 @@ const Acesso = () => {
                   <Input
                     type="password"
                     value={form.password}
-                    onChange={(e) => { setForm({ ...form, password: e.target.value }); clearAuthError(); }}
-                    placeholder="Crie uma senha"
+                    onChange={(e) => { setForm({ ...form, password: e.target.value }); clearAuthError(); setFormError(''); }}
+                    placeholder="Crie uma senha (mín. 4 caracteres)"
                     className="pl-10 h-12"
                   />
                 </div>
@@ -145,7 +147,7 @@ const Acesso = () => {
                   <Input
                     type="password"
                     value={form.confirm}
-                    onChange={(e) => { setForm({ ...form, confirm: e.target.value }); clearAuthError(); }}
+                    onChange={(e) => { setForm({ ...form, confirm: e.target.value }); clearAuthError(); setFormError(''); }}
                     placeholder="Confirme a senha"
                     className="pl-10 h-12"
                   />
@@ -159,6 +161,11 @@ const Acesso = () => {
               {authError?.type === 'register_error' && (
                 <p className="text-sm text-destructive font-semibold bg-destructive/10 rounded-xl p-3">
                   {authError.message}
+                </p>
+              )}
+              {formError && (
+                <p className="text-sm text-destructive font-semibold bg-destructive/10 rounded-xl p-3">
+                  {formError}
                 </p>
               )}
               <Button size="lg" className="w-full" onClick={doRegister} disabled={!form.name || !form.email || !form.password || !form.confirm}>
