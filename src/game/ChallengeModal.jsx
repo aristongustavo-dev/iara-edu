@@ -23,17 +23,19 @@ export default function ChallengeModal({ subject, questions, onCorrect, onDone, 
   const answer = (i) => {
     if (picked !== null) return;
     setPicked(i);
-    const isRight = i === q.a;
-    if (isRight) {
+    if (i === q.a) {
       setCorrect((c) => c + 1);
       onCorrect && onCorrect();
     }
-    setTimeout(() => {
-      setPicked(null);
-      if (idx + 1 >= questions.length) onDone(correct + (isRight ? 1 : 0));
-      else setIdx(idx + 1);
-    }, 900);
   };
+
+  const next = () => {
+    if (picked === null) return;
+    if (idx + 1 >= questions.length) onDone(correct);
+    else { setPicked(null); setIdx(idx + 1); }
+  };
+
+  const isLast = idx + 1 >= questions.length;
 
   const header = subject ? (
     <div className="flex items-center gap-2 mb-3">
@@ -70,9 +72,17 @@ export default function ChallengeModal({ subject, questions, onCorrect, onDone, 
         })}
       </div>
       {picked !== null && (
-        <p className="mt-3 text-center text-xs font-bold text-indigo-600">
-          {picked === q.a ? '✅ Certo! Pontos de Exploração ganhos.' : `😢 Errou! Resposta certa: ${q.opts[q.a]}`}
-        </p>
+        <div className="mt-4 space-y-3">
+          <p className="text-center text-xs font-bold text-indigo-600">
+            {picked === q.a ? '✅ Certo! Pontos de Exploração ganhos.' : `😢 Errou! Resposta certa: ${q.opts[q.a]}`}
+          </p>
+          <button
+            onClick={next}
+            className="w-full px-4 py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-bold text-sm hover:opacity-90 transition-opacity"
+          >
+            {isLast ? '🏁 Finalizar' : 'Próxima ➜'}
+          </button>
+        </div>
       )}
     </Overlay>
   );

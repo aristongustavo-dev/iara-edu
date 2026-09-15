@@ -1350,17 +1350,17 @@ function QuizModal({ title, questions, onCorrect, onDone }) {
   const answer = (i) => {
     if (picked !== null) return;
     setPicked(i);
-    const isRight = i === q.a;
-    if (isRight) {
+    if (i === q.a) {
       setCorrect((c) => c + 1);
       onCorrect && onCorrect();
     }
-    setTimeout(() => {
-      setPicked(null);
-      if (idx + 1 >= questions.length) onDone(correct + (isRight ? 1 : 0));
-      else setIdx(idx + 1);
-    }, 900);
   };
+  const next = () => {
+    if (picked === null) return;
+    if (idx + 1 >= questions.length) onDone(correct);
+    else { setPicked(null); setIdx(idx + 1); }
+  };
+  const isLast = idx + 1 >= questions.length;
   return (
     <Overlay title={`${title} — ${idx + 1}/${questions.length}`} onClose={() => onDone(correct)}>
       <p className="text-gray-800 font-semibold text-sm mb-3">{q.q}</p>
@@ -1380,9 +1380,17 @@ function QuizModal({ title, questions, onCorrect, onDone }) {
         })}
       </div>
       {picked !== null && (
-        <p className="mt-3 text-center text-xs font-bold text-indigo-600">
-          {picked === q.a ? '✅ Certo! Recompensas aplicadas.' : `😢 Errou! Resposta certa: ${q.opts[q.a]}`}
-        </p>
+        <div className="mt-4 space-y-3">
+          <p className="text-center text-xs font-bold text-indigo-600">
+            {picked === q.a ? '✅ Certo! Recompensas aplicadas.' : `😢 Errou! Resposta certa: ${q.opts[q.a]}`}
+          </p>
+          <button
+            onClick={next}
+            className="w-full px-4 py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-bold text-sm hover:opacity-90 transition-opacity"
+          >
+            {isLast ? '🏁 Finalizar' : 'Próxima ➜'}
+          </button>
+        </div>
       )}
     </Overlay>
   );
@@ -1840,6 +1848,20 @@ const GameWorld = ({ onClose, seedColor }) => {
     setTimeout(() => setNotifications((p) => p.slice(1)), 2600);
   };
 
+  const restartWorld = () => {
+    const ok = window.confirm('Refazer o mundo do zero? Todo o progresso vai ser perdido e você volta a adquirir tudo de novo, do início.');
+    if (!ok) return;
+    try { localStorage.removeItem(storageKey); } catch (e) { /* ignore */ }
+    setPlaced({});
+    setCrops({});
+    setBlocks(START_KIT);
+    setMaterials({ ...START_MATERIALS });
+    setStory(defaultStory());
+    setCheckpoint(null);
+    setModal(null);
+    pushToast('🔄 Mundo refeito do zero! Colete materiais e reconstrua a ponte.');
+  };
+
   const applyAward = (label, r) => {
     if (!r) return;
     setXp((p) => p + (r.xpGain || 0));
@@ -2131,6 +2153,19 @@ const GameWorld = ({ onClose, seedColor }) => {
     [farm]
   );
 
+  const challengeQuestions = useMemo(
+    () => (modal?.type === 'challenge' && !modal.station ? shufflePick(QUESTIONS, 3) : null),
+    [modal?.type === 'challenge' && !modal.station]
+  );
+  const stationQuestions = useMemo(
+    () => {
+      if (!(modal?.type === 'challenge' && modal.station)) return null;
+      const pool = SUBJECT_QUESTIONS[modal.station.id] || QUESTIONS;
+      return shufflePick(pool, 3);
+    },
+    [modal?.type === 'challenge' && modal.station?.id]
+  );
+
   const renderModal = () => {
     switch (modal?.type) {
       case 'dialog': {
@@ -2165,11 +2200,10 @@ const GameWorld = ({ onClose, seedColor }) => {
       case 'challenge': {
         const station = modal.station;
         if (station) {
-          const pool = SUBJECT_QUESTIONS[station.id] || QUESTIONS;
           return (
             <ChallengeModal
               subject={station}
-              questions={shufflePick(pool, 3)}
+              questions={stationQuestions || []}
               points={story.points}
               onCorrect={() => grantStationCorrect(station)}
               onDone={(correct) => finishStationChallenge(station, correct)}
@@ -2179,7 +2213,7 @@ const GameWorld = ({ onClose, seedColor }) => {
         return (
           <QuizModal
             title={modal.title || 'Desafio Matemático'}
-            questions={makeQuestions(null, 3)}
+            questions={challengeQuestions || makeQuestions(null, 3)}
             onCorrect={grantChallenge}
             onDone={() => {
               if (modal.fromIara && !story.iaraRewardClaimed) {
@@ -2240,12 +2274,21 @@ const GameWorld = ({ onClose, seedColor }) => {
 
   return (
     <div className="fixed inset-0 z-[90] bg-black">
-      <button
-        onClick={onClose}
-        className="absolute top-4 left-4 z-[95] bg-black/50 hover:bg-black/70 text-white px-4 py-2 rounded-xl font-bold text-sm backdrop-blur-sm transition-colors"
-      >
-        ← Sair do Mundo 3D
-      </button>
+      <div className="absolute top-4 left-4 z-[95] flex items-center gap-2">
+        <button
+          onClick={onClose}
+          className="bg-black/50 hover:bg-black/70 text-white px-4 py-2 rounded-xl font-bold text-sm backdrop-blur-sm transition-colors"
+        >
+          ← Sair do Mundo 3D
+        </button>
+        <button
+          onClick={restartWorld}
+          className="bg-black/50 hover:bg-rose-600/80 text-rose-200 hover:text-white px-3 py-2 rounded-xl font-bold text-sm backdrop-blur-sm transition-colors"
+          title="Refazer o mundo do zero"
+        >
+          🔄 Recomeçar
+        </button>
+      </div>
 
       <div className="absolute top-4 right-4 z-[95] flex items-center gap-2">
         <div className="bg-black/50 backdrop-blur-sm text-amber-300 px-3 py-2 rounded-xl font-bold text-xs flex items-center gap-1" title="Pontos de Exploração">
