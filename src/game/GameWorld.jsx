@@ -16,7 +16,7 @@ import ChallengeModal from './ChallengeModal';
 import ShopModal from './ShopModal';
 import {
   RIVER, BRIDGE, MATERIALS, START_MATERIALS, CHALLENGE_REWARD_MATERIALS,
-  QUESTIONS, SUBJECT_STATIONS, SUBJECT_QUESTIONS, ARENA_ROUNDS, CITY, ARENA, NPC_DIALOGS, LANDMARKS,
+  QUESTIONS, SUBJECT_STATIONS, SUBJECT_QUESTIONS, ARENA_ROUNDS, CITY, ARENA, NPC_DIALOGS, LANDMARKS, poolForLevel,
   SHOP_SPOT, TUTORIAL_STEPS, farmBuildingCells,
 } from './worldContent';
 
@@ -1293,9 +1293,9 @@ const shufflePick = (pool, n) =>
       return { q: q.q, opts: opts.map((s) => s.o), a: opts.findIndex((s) => s.i === q.a) };
     });
 
-const makeQuestions = (cat, n) => {
+const makeQuestions = (cat, n, level) => {
   const pool = cat ? QUESTIONS.filter((q) => q.cat === cat) : [...QUESTIONS];
-  return shufflePick(pool, n);
+  return shufflePick(poolForLevel(pool, level), n);
 };
 
 const Overlay = ({ title, onClose, children, wide }) => (
@@ -1396,7 +1396,7 @@ function QuizModal({ title, questions, onCorrect, onDone }) {
   );
 }
 
-function ArenaModal({ onClose, onFinish }) {
+function ArenaModal({ onClose, onFinish, level }) {
   const [phase, setPhase] = useState('intro');
   const [roundIdx, setRoundIdx] = useState(0);
   const [qIdx, setQIdx] = useState(0);
@@ -1407,7 +1407,7 @@ function ArenaModal({ onClose, onFinish }) {
 
   const round = ARENA_ROUNDS[roundIdx];
   const pool = useMemo(
-    () => (phase === 'q' || phase === 'between' ? makeQuestions(round.cat, round.n) : []),
+    () => (phase === 'q' || phase === 'between' ? makeQuestions(round.cat, round.n, level) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [phase, roundIdx]
   );
@@ -2154,13 +2154,13 @@ const GameWorld = ({ onClose, seedColor }) => {
   );
 
   const challengeQuestions = useMemo(
-    () => (modal?.type === 'challenge' && !modal.station ? shufflePick(QUESTIONS, 3) : null),
+    () => (modal?.type === 'challenge' && !modal.station ? shufflePick(poolForLevel(QUESTIONS, user?.grade_level), 3) : null),
     [modal?.type === 'challenge' && !modal.station]
   );
   const stationQuestions = useMemo(
     () => {
       if (!(modal?.type === 'challenge' && modal.station)) return null;
-      const pool = SUBJECT_QUESTIONS[modal.station.id] || QUESTIONS;
+      const pool = poolForLevel(SUBJECT_QUESTIONS[modal.station.id] || QUESTIONS, user?.grade_level);
       return shufflePick(pool, 3);
     },
     [modal?.type === 'challenge' && modal.station?.id]
@@ -2213,7 +2213,7 @@ const GameWorld = ({ onClose, seedColor }) => {
         return (
           <QuizModal
             title={modal.title || 'Desafio Matemático'}
-            questions={challengeQuestions || makeQuestions(null, 3)}
+            questions={challengeQuestions || makeQuestions(null, 3, user?.grade_level)}
             onCorrect={grantChallenge}
             onDone={() => {
               if (modal.fromIara && !story.iaraRewardClaimed) {
@@ -2242,6 +2242,7 @@ const GameWorld = ({ onClose, seedColor }) => {
       case 'arena':
         return (
           <ArenaModal
+            level={user?.grade_level}
             onClose={() => setModal(null)}
             onFinish={(rank, score) => {
               const r = awardReward(userEmail, 'WORLD_COLLECT', { extraXp: rank === 1 ? 90 : 45, extraCoins: rank === 1 ? 30 : 15 });
