@@ -1535,7 +1535,7 @@ function ArenaModal({ onClose, onFinish }) {
   );
 }
 
-const ROUND_ICONS = { 'Frações': '🍕', 'Porcentagem': '💯', 'Geometria': '📐', 'Desafio Mestre': '👑' };
+const ROUND_ICONS = { 'Frações': '🍕', 'Porcentagem': '💯', 'Geometria': '📐', 'Números e Operações': '🔢', 'Álgebra': '🔣', 'Medidas e Escalas': '📏', 'Probabilidade e Estatística': '🎲', 'Desafio Mestre': '👑' };
 
 function BridgeModal({ planks, materials, onBuild, onClose, allDone }) {
   const cost = BRIDGE.plankCost;
